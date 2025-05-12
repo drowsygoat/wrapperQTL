@@ -1,36 +1,19 @@
-#' Prepare MatrixEQTL Input Files
-#'
-#' This function prepares MatrixEQTL input files (features, feature locations, SNPs, and covariates)
-#' from a SummarizedExperiment or data.frame object. SNP and covariate data can be given as multiple files.
-#'
-#' @param features Either a SummarizedExperiment object or a numeric data.frame/matrix with features x samples.
-#' @param sampleMetadata Optional: A data.frame with sample annotations (required if `features` is not an SE).
-#' @param groupCol String; name of the column in sample metadata for groupings (e.g., clusters or conditions).
-#' @param sampleCol String; name of the sample ID column.
-#' @param snpPaths Character vector; paths to one or more SNP data files (MatrixEQTL format).
-#' @param covPaths Character vector; paths to one or more covariate files (MatrixEQTL format).
-#' @param resultsDir String; directory to store MatrixEQTL input files.
-#' @param matrixName Optional; assay name if using SummarizedExperiment (default = first assay).
-#' @param nChunks Integer; number of chunks to split the feature matrix into.
-#' @param topNrows Optional integer; select top N most expressed features per group.
-#' @param topNSNPs Optional integer; select top N most variable SNPs across samples.
-#' @param groupSubset Optional; vector of group labels to process.
-#' @param sliceSize Integer; slice size for SlicedData objects.
-#' @param gtfFile Optional; GTF file used to retrieve feature locations if not present in the SE.
-#' @param useGeneName Logical; whether to use gene_name instead of gene_id from GTF file.
-#'
-#' @return Logical TRUE (invisible) if execution succeeds.
+
+# files for snps and covariuates are either merged from separate files, or a patter is ised to select specific file. The file needs to be unique after patter matching.
+
 prepareMatrixEQTLInputs <- function(
   verbose = TRUE,
   features,
   sampleMetadata = NULL,
   groupCol,
-  sampleCol = "Sample",
+  sampleCol = "sample_id",
   snpPaths,
   covPaths,
   resultsDir,
+  minFeatureFrac = 0.8,
+  minFeatureMean = 0,
   matrixName = NULL,
-  nChunks = 1,
+  nChunks = 5,
   topNrows = NULL,
   topNSNPs = NULL,
   groupSubset = NULL,
@@ -43,103 +26,158 @@ prepareMatrixEQTLInputs <- function(
     dir.create(resultsDir, recursive = TRUE)
   }
 
-  extract_snp_locations <- function(snp_file) {
-    snp_df <- read.table(snp_file, header = TRUE, check.names = FALSE)
-    snp_ids <- snp_df[[1]]
-    pattern <- "^chr?(\\w+)[-:]([0-9]+)(?:[:_/-]([A-Za-z]+(/[A-Za-z]+)?))?$"
-    matches <- regexec(pattern, snp_ids)
-    parsed <- regmatches(snp_ids, matches)
+  filter_features_by_expression <- function(
+    mat, 
+    min_frac = 0.1, 
+    min_mean = 0
+  ) {
+    # mat: sparse gene x sample matrix
+    # min_frac: minimum fraction of samples a gene must be detected in
+    # min_mean: minimum mean expression across all samples
 
-    parsed_df <- do.call(rbind, lapply(parsed, function(x) {
-      if (length(x) < 3) return(c(NA, NA))
-      chr <- paste0("chr", x[2])
-      pos <- x[3]
-      return(c(chr, pos))
-    }))
+    stopifnot(is(mat, "sparseMatrix"))
 
-    locs <- data.frame(
-      snpid = snp_ids,
-      chr = parsed_df[, 1],
-      pos = as.integer(parsed_df[, 2]),
-      stringsAsFactors = FALSE
-    )
-    return(list(data = snp_df, locs = locs))
+    n_samples <- ncol(mat)
+    detect_frac <- Matrix::rowSums(mat > 0) / n_samples
+    mean_expr <- Matrix::rowMeans(mat)
+
+    keep <- detect_frac >= min_frac & mean_expr >= min_mean
+    mat[keep, , drop = FALSE]
   }
 
-  split_snp_chunks <- function(snpFilePath, n = 5, sep = "\t") {
-    parsed <- extract_snp_locations(snpFilePath)
-    SNPs_tmp <- parsed$data
-    SNPs_locs_tmp <- parsed$locs
-
-    if (!is.null(topNSNPs)) {
-      snp_mat <- as.matrix(SNPs_tmp[, -1])
-      snp_var <- apply(snp_mat, 1, function(x) var(as.numeric(x), na.rm = TRUE))
-      top_idx <- order(snp_var, decreasing = TRUE)[1:min(topNSNPs, nrow(SNPs_tmp))]
-      SNPs_tmp <- SNPs_tmp[top_idx, , drop = FALSE]
-      SNPs_locs_tmp <- SNPs_locs_tmp[top_idx, , drop = FALSE]
-    }
-
-    rows_per_chunk <- ceiling(nrow(SNPs_tmp) / n)
-    chunks_dir <- file.path(resultsDir, "snp_chunks")
-    base_n <- basename(snpFilePath)
-    if (!dir.exists(chunks_dir)) dir.create(chunks_dir)
-    chunks <- split(SNPs_tmp, ceiling(seq_len(nrow(SNPs_tmp)) / rows_per_chunk))
-    locs <- split(SNPs_locs_tmp, ceiling(seq_len(nrow(SNPs_tmp)) / rows_per_chunk))
-    write_chunk <- function(chunk, loc, index) {
-      file_name <- file.path(chunks_dir, paste("chunk", index, base_n, sep = "_"))
-      file_name_loc <- file.path(chunks_dir, paste("chunk", index, "loc", base_n, sep = "_"))
-      write.table(chunk, file = file_name, row.names = FALSE, sep = sep, quote = FALSE)
-      write.table(loc, file = file_name_loc, row.names = FALSE, sep = sep, quote = FALSE)
-    }
-    parallel::mclapply(seq_along(chunks), function(i) write_chunk(chunks[[i]], locs[[i]], i), mc.cores = max(1, parallel::detectCores() - 1))
+extract_snp_locations <- function(snp_input) {
+  if (is.character(snp_input) && file.exists(snp_input)) {
+    snp_df <- read.table(snp_input, header = TRUE, check.names = FALSE)
+  } else if (is.data.frame(snp_input)) {
+    snp_df <- snp_input
+  } else {
+    stop("snp_input must be a valid file path or a data frame.")
   }
 
-  if (verbose) message("Extracting and validating input features...")
-  # Input: extract matrices
+  print(head(snp_df))
+
+  snp_ids <- snp_df[[1]]
+
+  # Updated pattern: match "1:11991_C" → chr = 1, pos = 11991
+  parsed_df <- do.call(rbind, lapply(snp_ids, function(x) {
+    # Match "chr1:12345_C", "1:12345_C", etc.
+    parts <- strsplit(x, "[:_]")[[1]]
+    if (length(parts) >= 2) {
+      chr <- paste0("chr", parts[1])
+      pos <- as.integer(parts[2])
+    } else {
+      chr <- NA
+      pos <- NA
+    }
+    return(c(chr, pos))
+  }))
+
+  locs <- data.frame(
+    snpid = snp_ids,
+    chr = parsed_df[, 1],
+    pos = as.integer(parsed_df[, 2]),
+    stringsAsFactors = FALSE
+  )
+
+  print(head(locs))
+
+  return(list(data = snp_df, locs = locs))
+}
+
+########
+
+read_and_merge_files <- function(paths, pattern = NULL) {
+  
+  resolved_paths <- lapply(paths, function(p) {
+    if (!is.null(pattern) && file.info(p)$isdir) {
+      files <- list.files(p, pattern = pattern, full.names = TRUE)
+      if (length(files) == 0) stop("No files matching pattern '", pattern, "' found in directory: ", p)
+      if (length(files) > 1) stop("Multiple files matching pattern '", pattern, "' found in directory: ", p)
+      return(files[1])
+    } else {
+      if (!file.exists(p)) stop("File does not exist: ", p)
+      return(p)
+    }
+  }) 
+
+  resolved_paths <- unlist(resolved_paths)
+
+  # Read all files first
+  file_tables <- lapply(resolved_paths, function(p) {
+    df <- read.table(p, header = TRUE, check.names = FALSE)
+    if (nrow(df) == 0 || ncol(df) <= 1) stop("File has insufficient content: ", p)
+    df
+  })
+
+  # Identify shared columns across all data frames (excluding the first column, assumed to be IDs)
+  col_sets <- lapply(file_tables, function(df) colnames(df)[-1])
+  common_cols <- Reduce(intersect, col_sets)
+
+  if (length(common_cols) == 0) stop("No common sample columns found across input files.")
+
+  # Subset each data frame to keep only ID column and common sample columns
+  file_tables <- lapply(file_tables, function(df) {
+    df[, c(colnames(df)[1], common_cols), drop = FALSE]
+  })
+
+  merged <- do.call(rbind, file_tables)
+  return(merged)
+}
+
   is_SE <- inherits(features, "SummarizedExperiment")
+
   if (is_SE) {
     if (is.null(matrixName)) matrixName <- names(assays(features))[1]
     stopifnot(matrixName %in% names(assays(features)))
     feature_matrix <- as(assays(features)[[matrixName]], "sparseMatrix")
+    
+    if (verbose) message("Filtering features based on expression thresholds...")
+    feature_matrix <- filter_features_by_expression(feature_matrix, min_frac = minFeatureFrac, min_mean = minFeatureMean)
+
     sample_info <- as.data.frame(colData(features))
 
-    # Attempt to retrieve feature locations from rowData or GTF
     if (ncol(rowData(features)) >= 3 && all(c("seqnames", "start", "end") %in% colnames(rowData(features)))) {
-      feature_locs <- as.data.frame(rowData(features)) %>%
-        tibble::rownames_to_column("feature_id") %>%
+      feature_locs <- as.data.frame(rowData(features)) |>
+        tibble::rownames_to_column("feature_id") |>
         dplyr::select(feature_id, seqnames, start, end)
     } else if (!is.null(gtfFile)) {
-      message("Retrieving feature locations from GTF file...")
-      feature_locs <- rtracklayer::import(gtfFile) %>%
-        as.data.frame() %>%
-        dplyr::filter(type == "gene") %>%
-        dplyr::select(gene_id, gene_name, seqnames, start, end) %>%
-        dplyr::distinct() %>%
+      if (verbose) message("Retrieving feature locations from GTF file...")
+      feature_locs <- rtracklayer::import(gtfFile) |>
+        as.data.frame() |>
+        dplyr::filter(type == "gene") |>
+        dplyr::select(gene_id, gene_name, seqnames, start, end) |>
+        dplyr::distinct() |>
         dplyr::mutate(
           chr = as.character(seqnames),
-          geneid = case_when(useGeneName ~ gene_name,
-                             is.na(gene_name) ~ gene_id,
-                             TRUE ~ gene_name
-          ),
-          s1 = start,
-          s2 = end
-        ) %>% 
-        dplyr::select(feature_id = geneid, seqnames = chr, start = s1, end = s2) %>% 
-        dplyr::filter(feature_id %in% rownames(features)
-        )
+          geneid = dplyr::case_when(
+            useGeneName ~ gene_name,
+            is.na(gene_name) ~ gene_id,
+            TRUE ~ gene_name
+          )
+        ) |>
+        dplyr::select(feature_id = geneid, seqnames = chr, start, end) |>
+        dplyr::filter(feature_id %in% rownames(features))
+
+        if (!is.null(feature_locs)) {
+          feature_locs <- feature_locs |>
+          dplyr::mutate(
+            seqnames = ifelse(tolower(seqnames) == "mt", "chrM", paste0("chr", seqnames))
+          )
+        }
     } else {
-      warning("Feature locations not found in rowData and no GTF file provided. Skipping feature location export.")
+      warning("Feature locations not found in rowData and no GTF file provided.")
       feature_locs <- NULL
     }
   } else {
     stopifnot(is.matrix(features) || is.data.frame(features))
-    feature_matrix <- as(features, "sparseMatrix")
     stopifnot(!is.null(sampleMetadata))
+    feature_matrix <- as(features, "sparseMatrix")
     sample_info <- sampleMetadata
     feature_locs <- NULL
   }
 
   stopifnot(groupCol %in% colnames(sample_info), sampleCol %in% colnames(sample_info))
+
   if (!is.null(groupSubset)) {
     keep <- sample_info[[groupCol]] %in% groupSubset
     feature_matrix <- feature_matrix[, keep, drop = FALSE]
@@ -150,110 +188,105 @@ prepareMatrixEQTLInputs <- function(
   group_data <- sample_info[[groupCol]]
   groups <- unique(group_data)
 
-  
-  # Utility function to read and merge files from paths
-  read_and_merge_files <- function(paths, label) {
-    if (file.info(paths[1])$isdir) {
-      files <- list.files(paths[1], pattern = paste0("(?i)(", label, ")"), full.names = TRUE)
-      if (length(files) == 0) stop("No ", label, " files found in ", paths[1])
-      paths <- files
-    }
-    file_tables <- lapply(paths, function(p) {
-      if (!file.exists(p)) stop("File does not exist: ", p)
-      if (verbose) {
-        message("📄 Reading ", label, " file: ", p)
-        header <- readLines(p, n = 2)
-        message("Header: ", header[1])
-        message("First row: ", header[2])
-      }
-      df <- read.table(p, header = TRUE, check.names = FALSE)
-      if (nrow(df) == 0 || ncol(df) <= 1) stop("File has insufficient content: ", p)
-      df
-    })
-    merged <- Reduce(function(x, y) {
-      x_names <- colnames(x)[-1]
-      y_names <- colnames(y)[-1]
-      if (!identical(sort(x_names), sort(y_names))) {
-        stop("Column names (sample IDs) do not match between ", label, " files.")
-      }
-      colnames(x)[1] <- label
-      colnames(y)[1] <- label
-      rbind(x, y)
-    }, file_tables)
-    return(merged)
-  }
-
-  # Merge SNP and Covariate sample names
-  snp_df_merged <- read_and_merge_files(snpPaths, "snp")
-  cov_df_merged <- read_and_merge_files(covPaths, "covariate")
+  snp_df_merged <- read_and_merge_files(snpPaths)
 
   snp_samples <- colnames(snp_df_merged)[-1]
-  cov_samples <- colnames(cov_df_merged)[-1]
-  sample_ids <- if (inherits(features, "SummarizedExperiment")) unique(colData(features)[[sampleCol]]) else unique(sampleMetadata[[sampleCol]])
 
-  common_samples <- intersect(intersect(sample_ids, snp_samples), cov_samples)
+  common_samples <- intersect(sample_ids, snp_samples)
 
-  if (verbose) message("Matched ", length(common_samples), " samples across SNP, covariates, and features.")
+  if (verbose) message("Matched ", length(common_samples), " samples across SNP and features.")
 
-  # Export merged covariates to MatrixEQTL format
-  cov_export_path <- file.path(resultsDir, "merged_covariates.txt")
-  write.table(cov_df_merged, file = cov_export_path, sep = "\t", quote = FALSE, row.names = FALSE)
+  # SNP extraction + export
+  parsed_snp <- extract_snp_locations(snp_df_merged) # this prints head
+  snp_matrix <- parsed_snp$data
+  snp_locs <- parsed_snp$locs
 
-  if (verbose) message("✅ Covariates written to ", cov_export_path)
-
-# Save expression matrix chunks per group
-for (group in groups) {
-  if (verbose) message("Processing group: ", group)
-  group_idx <- which(group_data == group & sample_ids %in% common_samples)
-  if (length(group_idx) == 0) next
-
-  mat <- feature_matrix[, group_idx, drop = FALSE]
-  if (!is.null(topNrows)) {
-    top_idx <- order(Matrix::rowSums(mat), decreasing = TRUE)[1:min(topNrows, nrow(mat))]
-    mat <- mat[top_idx, , drop = FALSE]
+  if (!is.null(topNSNPs)) {
+    snp_mat <- as.matrix(snp_matrix[, -1])
+    snp_var <- apply(snp_mat, 1, function(x) var(as.numeric(x), na.rm = TRUE))
+    top_idx <- order(snp_var, decreasing = TRUE)[1:min(topNSNPs, nrow(snp_matrix))]
+    snp_matrix <- snp_matrix[top_idx, , drop = FALSE]
+    snp_locs <- snp_locs[top_idx, , drop = FALSE]
   }
 
-  group_dir <- file.path(resultsDir, paste0("group_", group, "_results"))
-  if (!dir.exists(group_dir)) {
-    if (verbose) message("Creating directory: ", group_dir)
-    dir.create(group_dir, recursive = TRUE)
-  }
+  if (nChunks <= 0) { # remove this later
+    saveRDS(snp_matrix, file.path(resultsDir, "merged_SNPs.rds"))
+    saveRDS(snp_locs, file.path(resultsDir, "merged_SNP_locations.rds"))
+    if (verbose) message("✅ Full SNP matrix and location saved as RDS.")
+  } else {
+    snp_chunks_dir <- file.path(resultsDir, "snp_chunks_rds")
+    dir.create(snp_chunks_dir, showWarnings = FALSE, recursive = TRUE)
+    rows_per_chunk <- ceiling(nrow(snp_matrix) / nChunks)
 
-  # Subset feature locations (if available)
-  if (!is.null(feature_locs)) {
-    loc_subset <- feature_locs[feature_locs$feature_id %in% rownames(mat), , drop = FALSE]
-    loc_path <- file.path(group_dir, paste0("group_", group, "_feature_location.txt"))
-    write.table(
-      loc_subset,
-      file = loc_path,
-      sep = "\t",
-      row.names = FALSE,
-      col.names = TRUE,
-      quote = FALSE
-    )
-    rows_per_chunk <- ceiling(nrow(loc_subset) / nChunks)
     for (i in seq_len(nChunks)) {
       start <- (i - 1) * rows_per_chunk + 1
-      end <- min(i * rows_per_chunk, nrow(loc_subset))
-      chunk <- loc_subset[start:end, , drop = FALSE]
-      saveRDS(chunk, file.path(group_dir, paste0("group_", group, "chunk_", i, "_loc_input_MEQTL.rds")))
+      end <- min(i * rows_per_chunk, nrow(snp_matrix))
+      chunk <- snp_matrix[start:end, , drop = FALSE]
+      locs_chunk <- snp_locs[start:end, , drop = FALSE]
+
+      saveRDS(chunk, file.path(snp_chunks_dir, paste0("chunk_", i, "_SNPs.rds")))
+
+      saveRDS(locs_chunk, file.path(snp_chunks_dir, paste0("chunk_", i, "_SNP_locations.rds")))
     }
+    if (verbose) message("✅ SNP matrix and locations chunked into ", nChunks, " and saved to ", snp_chunks_dir)
   }
 
-  rows_per_chunk <- ceiling(nrow(mat) / nChunks)
-  for (i in seq_len(nChunks)) {
-    start <- (i - 1) * rows_per_chunk + 1
-    end <- min(i * rows_per_chunk, nrow(mat))
-    chunk <- mat[start:end, , drop = FALSE]
+  # Save expression matrix chunks per group
+  for (group in groups) {
+    if (verbose) message("📦 Processing group: ", group)
+    group_idx <- which(group_data == group & sample_ids %in% common_samples)
+    if (length(group_idx) == 0) next
 
-    sliced <- SlicedData$new()
-    sliced$CreateFromMatrix(as(chunk, "matrix"))
-    sliced$ResliceCombined(sliceSize)
+    mat <- feature_matrix[, group_idx, drop = FALSE]
+    if (!is.null(topNrows)) {
+      top_idx <- order(Matrix::rowSums(mat), decreasing = TRUE)[1:min(topNrows, nrow(mat))]
+      mat <- mat[top_idx, , drop = FALSE]
+    }
 
-    output_path <- file.path(group_dir, paste0("group_", group, "_chunk_", i, "_input_MEQTL.rds"))
-    if (verbose) message("Saving feature chunk to ", output_path)
-    saveRDS(sliced, output_path)
+    group_dir <- file.path(resultsDir, paste0("group_", group, "_results"))
+    dir.create(group_dir, showWarnings = FALSE, recursive = TRUE)
+
+    if (!is.null(feature_locs)) {
+      loc_subset <- feature_locs[feature_locs$feature_id %in% rownames(mat), , drop = FALSE]
+      saveRDS(loc_subset, file.path(group_dir, paste0("group_", group, "_feature_locations.rds")))
+
+      rows_per_chunk <- ceiling(nrow(loc_subset) / nChunks)
+      for (i in seq_len(nChunks)) {
+        chunk <- loc_subset[((i - 1) * rows_per_chunk + 1):min(i * rows_per_chunk, nrow(loc_subset)), , drop = FALSE]
+        saveRDS(chunk, file.path(group_dir, paste0("group_", group, "_chunk_", i, "_loc_input_MEQTL.rds")))
+      }
+    }
+
+    rows_per_chunk <- ceiling(nrow(mat) / nChunks)
+
+    for (i in seq_len(nChunks)) {
+      chunk <- mat[((i - 1) * rows_per_chunk + 1):min(i * rows_per_chunk, nrow(mat)), , drop = FALSE]
+      sliced <- SlicedData$new()
+      sliced$CreateFromMatrix(as(chunk, "matrix"))
+      sliced$ResliceCombined(sliceSize)
+      saveRDS(sliced, file.path(group_dir, paste0("group_", group, "_chunk_", i, "_input_MEQTL.rds")))
+    }
+
+print("cov_df_merged <- read_and_merge_files(covPaths...")
+
+    cov_df_merged <- read_and_merge_files(covPaths, pattern = paste0(group, "_"))
+    
+print("DONE")
+
+    cov_samples <- colnames(cov_df_merged)[-1]
+
+    common_samples <- intersect(intersect(sample_ids, snp_samples), cov_samples)
+
+    if (verbose) message("Matched ", length(common_samples), " samples across SNP, covariates, and features.")
+
+    cov_export_path <- file.path(group_dir, "merged_covariates.txt")
+    
+    write.table(cov_df_merged, file = cov_export_path, sep = "\t", quote = FALSE, row.names = FALSE)
+    
+    if (verbose) message("✅ Covariates written to ", cov_export_path)
+    if (verbose) message("✅ Covariates saved as RDS to: ", cov_export_path)
+
   }
-}
+  
   invisible(TRUE)
 }
