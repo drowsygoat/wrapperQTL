@@ -4,7 +4,6 @@ library(MatrixEQTL)
 library(futile.logger)
 library(R.utils)
 
-
 #' Debug checkpoint logger
 checkpoint <- function(msg, verbose = TRUE) {
   if (verbose) flog.info(paste0("[Checkpoint] ", msg), name = "matrixeqtl")
@@ -51,7 +50,7 @@ load_sliced_file <- function(file, sliceSize = 2000, first_col_is_rownames = TRU
 
       sd$CreateFromMatrix(as.matrix(data))
     } else {
-      stop("RDS file must contain a matrix or data.frame.")
+      stop("RDS file must contain a matrix or a data.frame.")
     }
 
   } else {
@@ -136,7 +135,7 @@ matrixEQTLwrapper <- function(
   covFilePath,
   snpLocPath,
   group_name,
-  resultsDir = "getwd()",
+  resultsDir = getwd(),
   cisDist = 1e6,
   pvOutputThreshold = 1e-5,
   pvOutputThresholdCis = 1e-4,
@@ -188,8 +187,10 @@ matrixEQTLwrapper <- function(
     return(invisible(NULL))
   }
 
-  if (file.exists(gz_trans)) {
-    checkpoint(paste("Result already exists:", gz_trans), verbose)
+  if (file.exists(gz_trans) && file.exists(gz_cis)) {
+    warning(sprintf("Result files already exist: %s and/or %s. Skipping run.", gz_trans, gz_cis))
+    checkpoint(sprintf("Result files already exist: %s and/or %s. Skipping run.", gz_trans, gz_cis))
+    message(sprintf("Result files already exist: %s and/or %s. Skipping run.", gz_trans, gz_cis))
     return(invisible(NULL))
   }
 

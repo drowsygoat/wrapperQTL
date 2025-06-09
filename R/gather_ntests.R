@@ -1,4 +1,5 @@
-# Function to parse command-line arguments using argparse
+#!/usr/bin/env Rscript
+
 parse_args <- function() {
   parser <- argparse::ArgumentParser(description = "Process eQTL files")
   parser$add_argument("directory", help = "Directory containing the files")

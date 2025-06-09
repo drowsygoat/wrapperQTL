@@ -1,10 +1,11 @@
-matrixEQTLwrapperMC <- function(
+matrixEQTLwrapperMCarray <- function(
   feature_locations_path,
   feature_data_path,
   snpFilePath,
   snpLocPath,
   covFilePath,
   group_name,
+  chunk_id,
   resultsDir = getwd(),
   cisDist = 1e6,
   pvOutputThreshold = 1e-5,
@@ -27,11 +28,11 @@ matrixEQTLwrapperMC <- function(
 
   DATA <- list.files(file.path(feature_data_path, group_name), pattern = "chunk_[0-9]+_input", full.names = TRUE)
 
-print(DATA)
+# print(DATA)
 
     SNP  <- list.files(snpFilePath, pattern = "chunk_[0-9]+_SNPs", full.names = TRUE)
 
-print(SNP)
+# print(SNP)
 
     iteration_df <- expand.grid(
       DATA = DATA,
@@ -68,17 +69,14 @@ print(chunk_feature)
     for (i in seq_len(nrow(iteration_df))) {
       message(sprintf("  [%d/%d] Expression: %s | SNP: %s | SNP loc: %s | Expr loc: %s",
                       i, nrow(iteration_df),
-                      basename(iteration_df$DATA[[i]]),
-                      basename(iteration_df$SNP[[i]]),
-                      basename(iteration_df$SNP_LOC[[i]]),
-                      basename(iteration_df$DATA_LOC[[i]])))
+                      basename(iteration_df$DATA[[chunk_id]]),
+                      basename(iteration_df$SNP[[chunk_id]]),
+                      basename(iteration_df$SNP_LOC[[chunk_id]]),
+                      basename(iteration_df$DATA_LOC[[chunk_id]])))
     }
     return(invisible(NULL))
   }
-
-  num_cores <- if (is.null(threads)) max(1, parallel::detectCores() %/% 2) else threads
-  message(sprintf("[INFO] Using %d core(s) for processing.", num_cores))
-  message("[INFO] Starting Matrix eQTL chunked analysis...")
+  message(sprintf("[INFO] Starting Matrix eQTL chunked analysis for %s", chunk_id))
 
   run_job <- function(i) {
     matrixEQTLwrapper(
@@ -103,16 +101,10 @@ print(chunk_feature)
     )
   }
 
-  idx <- seq_len(nrow(iteration_df))
-  if (num_cores > 1) {
-    # pbapply::pblapply(idx, run_job, cl = num_cores)
-    parallel::mclapply(idx, run_job, mc.cores = num_cores, mc.preschedule = FALSE)
+  run_job(chunk_id)
 
-  } else {
-    lapply(idx, run_job)
-  }
+  message(sprintf("[INFO] Array element %s processed.", chunk_id))
 
-  message("[INFO] All chunk combinations processed.")
 }
 
 check_directories <- function(...) {

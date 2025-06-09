@@ -13,14 +13,20 @@ library(futile.logger)
 parser <- ArgumentParser(description = 'Process QTL analysis arguments')
 
 parser$add_argument("group_name", help = "Name of the group")
+parser$add_argument("outputDir", help = "Output directory")
 parser$add_argument("snpFilePath", help = "Path to the directory containing SNP chunks")
 parser$add_argument("snpLocPath", help = "Path to the directory containing SNP location files")
 parser$add_argument("feature_data_path", help = "Path to the directory containing expression data chunks")
 parser$add_argument("feature_locations_path", help = "Path to the directory containing expression location files")
 parser$add_argument("covFilePath", help = "Path to the covariates file")
-parser$add_argument("--threads", type = "integer", default = 10, help = "Number of threads to use (default: 10)")
-parser$add_argument("--dry_run", action = "store_true", help = "Dry run mode — don't run analysis, just simulate")
-parser$add_argument("--verbose", action = "store_true", help = "Enable verbose logging")  # Not used currently
+parser$add_argument("--threads", type = "integer", default = 10,
+                    help = "Number of threads to use (default: 10)")
+parser$add_argument("--dry_run", action = "store_true",
+                    help = "Dry run mode — don't run analysis, just simulate")
+parser$add_argument("--jobArrayID", type = "integer", default = NULL,
+                    help = "Chunk ID (e.g. from SLURM_ARRAY_TASK_ID)")
+parser$add_argument("--verbose", action = "store_true",
+                    help = "Enable verbose logging")
 
 # Parse command-line arguments
 args <- parser$parse_args()
@@ -38,16 +44,18 @@ matrixEQTLwrapperMC(
   snpLocPath = args$snpLocPath,
   covFilePath = args$covFilePath,
   group_name = args$group_name,
-  resultsDir = getwd(),
+  resultsDir = args$outputDir,
   cisDist = 1e6,
   pvOutputThreshold = 1e-6,
   pvOutputThresholdCis = 1e-5,
   useModel = "linear",
   minPvByGeneSnp = FALSE,
-  noFDRsaveMemory = FALSE,
+  noFDRsaveMemory = TRUE,
   SNPsInChunks = FALSE,
   prefix = "defaultprefix",
   pvalueHist = "qqplot",
   threads = args$threads,
-  dry_run = args$dry_run
+  dry_run = args$dry_run,
+  chunk_id = args$jobArrayID
+
 )
