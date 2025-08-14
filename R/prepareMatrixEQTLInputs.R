@@ -196,6 +196,9 @@ prepareMatrixEQTLInputs <- function(
   snp_df_merged <- read_and_merge_files(snpPaths)
   snp_samples <- colnames(snp_df_merged)[-1]
   common_samples <- intersect(sample_ids, snp_samples)
+print(sample_ids)
+print(snp_samples)
+
 
   if (verbose) message("Matched ", length(common_samples), " samples across SNP and features.")
 

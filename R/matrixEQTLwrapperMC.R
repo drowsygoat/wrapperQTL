@@ -17,21 +17,28 @@ matrixEQTLwrapperMC <- function(
   prefix = NULL,
   threads = 1,
   dry_run = FALSE,
-  verbose = TRUE
+  verbose = TRUE,
+  colNames_convention = c("1", "_")
 ) {
   message("[INFO] Checking input directories...")
 
+  print(colNames_convention)
+  print(class(colNames_convention))
+  print(typeof(colNames_convention))
+  print(length(colNames_convention))
+
+  check_directories(feature_locations_path, feature_data_path, snpFilePath, snpLocPath)
   prepare_iteration_df <- function(feature_locations_path, feature_data_path, snpFilePath, snpLocPath, group_name, threads = NULL) {
 
   check_directories(feature_locations_path, feature_data_path, snpFilePath, snpLocPath)
 
   DATA <- list.files(file.path(feature_data_path, group_name), pattern = "chunk_[0-9]+_input", full.names = TRUE)
 
-print(DATA)
+# print(DATA)
 
     SNP  <- list.files(snpFilePath, pattern = "chunk_[0-9]+_SNPs", full.names = TRUE)
 
-print(SNP)
+# print(SNP)
 
     iteration_df <- expand.grid(
       DATA = DATA,
@@ -39,13 +46,13 @@ print(SNP)
       stringsAsFactors = FALSE
     )
     
-print(iteration_df)
+# print(iteration_df)
 
     chunk_snp     <- grep_o(iteration_df$SNP, "chunk_[0-9]+")
     chunk_feature <- grep_o(iteration_df$DATA, "chunk_[0-9]+")
 
-print(chunk_snp)
-print(chunk_feature)
+# print(chunk_snp)
+# print(chunk_feature)
 
     iteration_df$SNP_LOC <- sapply(chunk_snp, function(x) {
       list.files(snpLocPath, pattern = paste0(x, "_SNP_loc"), full.names = TRUE)[[1]]
@@ -77,6 +84,7 @@ print(chunk_feature)
   }
 
   num_cores <- if (is.null(threads)) max(1, parallel::detectCores() %/% 2) else threads
+
   message(sprintf("[INFO] Using %d core(s) for processing.", num_cores))
   message("[INFO] Starting Matrix eQTL chunked analysis...")
 
@@ -99,7 +107,8 @@ print(chunk_feature)
       # SNPsInChunks           = SNPsInChunks,
       prefix                 = prefix,
       dry_run                = dry_run,
-      verbose                = verbose
+      verbose                = verbose,
+      colNames_convention    = colNames_convention # argument provided in 
     )
   }
 

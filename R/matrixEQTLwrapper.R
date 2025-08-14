@@ -67,19 +67,72 @@ load_sliced_file <- function(file, sliceSize = 2000, first_col_is_rownames = TRU
 #' Validate and reorder sample columns if needed, based on trimmed sample names
 #' Trims suffixes from sample names (e.g., removes '_C1_RNA') before checking
 #' @export
-validate_sample_overlap <- function(feature_data, snps, covs, group_name, verbose = TRUE) {
+validate_sample_overlap <- function(feature_data, snps, covs, group_name, colNames_convention, verbose = TRUE) {
+
+  print("colNames_convention_in_validate_sample_overlap")
+  print(colNames_convention)
+  print(class(colNames_convention))
+  print(typeof(colNames_convention))
+  print(length(colNames_convention))
 
   # Extract column names
   expr_samples_raw <- feature_data$columnNames
   snp_samples_raw <- snps$columnNames
   cov_samples_raw <- covs$columnNames
 
-  # Trim everything after the first underscore
-  trim_names <- function(x) sub("_.*$", "", x)
+  print(expr_samples_raw)
+  print(snp_samples_raw)
+  print(cov_samples_raw)
+  
+  # Trim accordingly (needs to be improved)
+  #INTERNAL!!!!!
+
+  trim_names <- function(x) {
+    # Validate input
+    print("colNames_convention_in_trim_names")
+    print(colNames_convention)
+
+    if (length(colNames_convention) != 2) {
+      stop("colNames_convention must be a character vector of length 2: c(position, separator)")
+    }
+
+    sample_index <- as.integer(colNames_convention[1])
+    separator <- colNames_convention[2]
+
+    if (is.na(sample_index) || sample_index < 1) {
+      stop("First element of colNames_convention must be a positive integer as string (e.g., '1')")
+    }
+
+    sapply(x, function(name) {
+      if (grepl(separator, name, fixed = TRUE)) {
+        parts <- strsplit(name, separator, fixed = TRUE)[[1]]
+        if (length(parts) >= sample_index) {
+          return(parts[[sample_index]])
+        } else {
+          warning(sprintf("Name '%s' does not have enough parts, returning NA", name))
+          return(NA)
+        }
+      } else {
+        # separator not found, return the whole name
+        return(name)
+      }
+    }, USE.NAMES = FALSE)
+  }
 
   expr_samples <- trim_names(expr_samples_raw)
   snp_samples <- trim_names(snp_samples_raw)
   cov_samples <- trim_names(cov_samples_raw)
+
+  print("expr_samples")
+    print(expr_samples)
+
+  print("snp_samples")
+    print(snp_samples)
+
+  print("cov_samples")
+    print(cov_samples)
+
+
 
   # Check for missing samples
   missing_in_snps <- setdiff(expr_samples, snp_samples)
@@ -107,6 +160,8 @@ validate_sample_overlap <- function(feature_data, snps, covs, group_name, verbos
   covs$columnNames <- expr_samples
   feature_data$columnNames <- expr_samples
 }
+
+
 
 # #' Validate and reorder sample columns if needed
 # #' @export
@@ -146,7 +201,9 @@ matrixEQTLwrapper <- function(
   prefix = NULL,
   pvalueHist = NULL,
   verbose = TRUE,
-  dry_run = TRUE 
+  dry_run = TRUE,
+  colNames_convention
+
 ) {
   checkpoint("Starting matrixEQTLwrapper", verbose)
 
@@ -211,7 +268,7 @@ matrixEQTLwrapper <- function(
 
     checkpoint("Sliced SNP and covariate data loaded", verbose)
 
-    validate_sample_overlap(feature_data, snp_sliced, cov_sliced, group_name, verbose)
+    validate_sample_overlap(feature_data, snp_sliced, cov_sliced, group_name, colNames_convention, verbose = TRUE)
 
     checkpoint("Sample overlap validated", verbose)
 
@@ -303,6 +360,9 @@ check_match <- function(sample_name, group_name_vector) {
 check_complete_match <- function(sample_name_vector, group_name_vector) {
   all(sapply(sample_name_vector, check_match, group_name_vector = group_name_vector))
 }
+
+
+
 #replace these two fucntion with the one below
 
 

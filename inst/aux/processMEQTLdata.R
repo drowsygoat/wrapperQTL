@@ -103,8 +103,6 @@ benchmark_lapply <- function(trans_files, p_val_threshold) {
     print(result)
 }
 
-
-
 # Function to adjust p-values and filter data
 load_and_filter <- function(file, p_val_threshold = NULL, threshold = "FDR", n_tests_for_p_adjust) {
 
@@ -113,8 +111,7 @@ load_and_filter <- function(file, p_val_threshold = NULL, threshold = "FDR", n_t
     # message("time1")
     num_lines <- R.utils::countLines(file)[[1]]
     # message("time2")
-
-    if (num_lines <= 2) { # change this is skipping line to
+    if (num_lines <= 2) { # change this if skipping line
         message(paste("Skipping file due to insufficient lines:", file))
         return(NULL)
     }
@@ -150,7 +147,9 @@ load_and_filter <- function(file, p_val_threshold = NULL, threshold = "FDR", n_t
     if (threshold == "FWER") {
         data[, FWER := p.adjust(p_value, method = "FWER", n = n_tests_for_p_adjust)]
         data <- data[FWER < 0.1]
+
     } else {
+        
         data[, FDR := p.adjust(p_value, method = "BH", n = n_tests_for_p_adjust)]
         data <- data[FDR < 0.1]
     }
@@ -188,7 +187,6 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
 
     cis_files <- grep(prefix, cis_files, value = TRUE)
     trans_files <- grep(prefix, trans_files, value = TRUE)
-
 
         # # Pick 10 files to test with
         # test_trans_files <- head(trans_files, 10)
@@ -284,8 +282,6 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
     bon_plotdata[, chr_snp := paste0("chr", chr_snp)]
     bon_plotdata <- bon_plotdata[nchar(chr_snp) < 6]
 
-
-
     print("1")
     print(head(bon_plotdata))
     print("2")
@@ -348,12 +344,18 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
     saveRDS(bon_plotdata, file = file.path(results_path, paste(prefix, "results.rds", sep = "_")))
 
 }
+############################
+quit(save = "no", status = 0)
+############################
+
+# part below redundant, causes memory issue, not needed to get QTLs
 
 make_all_plots_data <- function(results_path = results_path,
                                 prefix, 
                                 threshold = "FDR") {
 
 print("make_all_plots_data")
+
     bin_column <- ifelse(threshold == "FDR", "FDR_bins", "FWER_bins")
 
     bon_plotdata <- readRDS(file.path(results_path, paste(prefix, "results.rds", sep = "_")))
