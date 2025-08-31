@@ -2,10 +2,19 @@
 % Please edit documentation in R/matrixEQTLwrapper.R
 \name{validate_sample_overlap}
 \alias{validate_sample_overlap}
-\title{Validate and reorder sample columns if needed}
+\title{Validate and reorder sample columns if needed, based on trimmed sample names
+Trims suffixes from sample names (e.g., removes '_C1_RNA') before checking}
 \usage{
-validate_sample_overlap(feature_data, snps, covs, group_name, verbose = TRUE)
+validate_sample_overlap(
+  feature_data,
+  snps,
+  covs,
+  group_name,
+  colNames_convention,
+  verbose = TRUE
+)
 }
 \description{
-Validate and reorder sample columns if needed
+Validate and reorder sample columns if needed, based on trimmed sample names
+Trims suffixes from sample names (e.g., removes '_C1_RNA') before checking
 }

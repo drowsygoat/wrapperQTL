@@ -11,18 +11,18 @@ matrixEQTLwrapper(
   covFilePath,
   snpLocPath,
   group_name,
-  resultsDir = "getwd()",
+  resultsDir = getwd(),
   cisDist = 1e+06,
   pvOutputThreshold = 1e-05,
   pvOutputThresholdCis = 1e-04,
   useModel = "linear",
   minPvByGeneSnp = TRUE,
   noFDRsaveMemory = FALSE,
-  SNPsInChunks = NULL,
   prefix = NULL,
   pvalueHist = NULL,
   verbose = TRUE,
-  dry_run = TRUE
+  dry_run = TRUE,
+  colNames_convention
 )
 }
 \description{

@@ -10,7 +10,7 @@
 #'   \item \code{location_snp}: SNP positions as character strings.
 #' }
 #'
-#' @details
+#' @details 
 #' This function:
 #' \itemize{
 #'   \item Uses \code{grep -v '^##'} to skip metadata header lines.
