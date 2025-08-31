@@ -2,7 +2,7 @@
 % Please edit documentation in R/PlotClusterCovariateSummary.R
 \name{PlotClusterCovariateSummary}
 \alias{PlotClusterCovariateSummary}
-\title{Plot Cluster–Sample Summary (Mean/Median of Non‑Zero Values)}
+\title{Plot Cluster-Sample Summary (Mean/Median of Non-Zero Values)}
 \usage{
 PlotClusterCovariateSummary(
   se_path,
@@ -30,8 +30,8 @@ effects (writing a plot).
 }
 \description{
 Reads a serialized \code{SummarizedExperiment} (\code{.rds}), computes per
-\strong{cluster × sample} summaries of a chosen assay (mean and median of
-non‑zero entries), and saves a combined boxplot with jittered points.
+\strong{cluster  x  sample} summaries of a chosen assay (mean and median of
+non-zero entries), and saves a combined boxplot with jittered points.
 }
 \details{
 The input \code{SummarizedExperiment} must contain at least two columns in
@@ -41,9 +41,9 @@ The input \code{SummarizedExperiment} must contain at least two columns in
 \item \code{sample_id}: sample identifier (coerced to character)
 }
 For each cluster, samples present in that cluster are considered. For each
-\code{cluster × sample} subset, all \emph{non‑zero} entries of the assay are
+\code{cluster  x  sample} subset, all \emph{non-zero} entries of the assay are
 taken, and their mean and median are computed. These statistics are reshaped
-to long format and visualized as boxplots with quasi‑random points on top.
+to long format and visualized as boxplots with quasi-random points on top.
 
 If \code{assay_name} is \code{NULL}, the first assay is selected and a note
 is messaged. The plot is saved with \code{ggplot2::ggsave()} to

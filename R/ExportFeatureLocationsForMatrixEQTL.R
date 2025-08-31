@@ -9,7 +9,7 @@
 #' @param output_dir Directory where the output file will be saved. Defaults to the current directory.
 #' @param use_gene_name Logical. If `TRUE`, match genes by `gene_name` first, falling back to `gene_id`. 
 #' If `FALSE`, match only by `gene_id`.
-#' @param add_chr_prefix Logical. If `TRUE`, adds `"chr"` prefix to chromosome names (e.g., `1` → `chr1`).
+#' @param add_chr_prefix Logical. If `TRUE`, adds `"chr"` prefix to chromosome names (e.g., `1` -> `chr1`).
 #' @param filename Name of the output file. Defaults to `"feature_locations.txt"`.
 #'
 #' @return (Invisibly) the path to the output file containing the feature locations.

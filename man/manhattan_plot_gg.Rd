@@ -6,9 +6,9 @@
 \usage{
 manhattan_plot_gg(
   df,
-  chr_col = "Chromosome",
-  pos_col = "PeakPosition",
-  p_col = "PeakPvalue",
+  chr_col = "chr",
+  pos_col = "location",
+  p_col = "FDR_recal",
   region_start_col = "RegionStart",
   region_end_col = "RegionEnd",
   sig.level = NA,
@@ -37,7 +37,7 @@ Use \code{NA} (default) to omit the line.}
 \item{show_regions}{Logical; if \code{TRUE} (default) and both region columns are present
 in \code{df}, shaded rectangles are drawn over those regions.}
 
-\item{region_alpha}{Alpha for region shading (0–1). Default \code{0.1}.}
+\item{region_alpha}{Alpha for region shading (0-1). Default \code{0.1}.}
 
 \item{col}{Two-color vector used to alternate chromosome point colors. Default
 \code{c("gray40","gray60")}.}

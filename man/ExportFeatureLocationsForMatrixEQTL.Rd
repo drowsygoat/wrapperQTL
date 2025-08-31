@@ -23,7 +23,7 @@ ExportFeatureLocationsForMatrixEQTL(
 \item{use_gene_name}{Logical. If \code{TRUE}, match genes by \code{gene_name} first, falling back to \code{gene_id}.
 If \code{FALSE}, match only by \code{gene_id}.}
 
-\item{add_chr_prefix}{Logical. If \code{TRUE}, adds \code{"chr"} prefix to chromosome names (e.g., \code{1} → \code{chr1}).}
+\item{add_chr_prefix}{Logical. If \code{TRUE}, adds \code{"chr"} prefix to chromosome names (e.g., \code{1} -> \code{chr1}).}
 
 \item{filename}{Name of the output file. Defaults to \code{"feature_locations.txt"}.}
 }

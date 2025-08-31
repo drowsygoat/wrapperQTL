@@ -1,7 +1,7 @@
 #' Convert chromosome names by adding or removing "chr" prefix
 #'
-#' This function converts chromosome identifiers by either adding the "chr" prefix (e.g., `1` → `chr1`) 
-#' or removing it (e.g., `chr1` → `1`). It also handles the mitochondrial chromosome (`MT` ↔ `chrM`).
+#' This function converts chromosome identifiers by either adding the "chr" prefix (e.g., `1` -> `chr1`) 
+#' or removing it (e.g., `chr1` -> `1`). It also handles the mitochondrial chromosome (`MT` <-> `chrM`).
 #'
 #' @param chroms A character vector of chromosome names.
 #' @param direction A string specifying the conversion direction: `"add"` to add the "chr" prefix, or `"remove"` to remove it.

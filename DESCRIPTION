@@ -1,15 +1,26 @@
 Package: wrapperQTL
-Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
+Title: MatrixEQTL Wrapper for QTL Analysis
+Version: 1.0.0
+Maintainer: Lech Kaczmarczyk <drowsygoat1982@gmail.com>
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"),
-           comment = c(ORCID = "YOUR-ORCID-ID"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person(
+        given = "Lech",
+        family = "Kaczmarczyk",
+        email = "drowsygoat1982@gmail.com",
+        role = c("aut", "cre")
+    )
+Description: MatrixEQTL wrapper for QTL analysis, including functions for 
+    running the analysis, processing results, and visualizing QTL data.
+License: GPL-3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Imports: 
-    testthat
+    SummarizedExperiment,
+    ggplot2,
+    Matrix,
+    data.table,
+    ggbeeswarm
+Suggests:
+    testthat (>= 3.0.0)
 Config/testthat/edition: 3

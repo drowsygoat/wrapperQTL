@@ -15,8 +15,8 @@ convert_chromosome_ids(chroms, direction = c("add", "remove"))
 A character vector of converted chromosome names.
 }
 \description{
-This function converts chromosome identifiers by either adding the "chr" prefix (e.g., \code{1} → \code{chr1})
-or removing it (e.g., \code{chr1} → \code{1}). It also handles the mitochondrial chromosome (\code{MT} ↔ \code{chrM}).
+This function converts chromosome identifiers by either adding the "chr" prefix (e.g., \code{1} -> \code{chr1})
+or removing it (e.g., \code{chr1} -> \code{1}). It also handles the mitochondrial chromosome (\code{MT} <-> \code{chrM}).
 }
 \examples{
 convert_chromosome_ids(c("1", "2", "MT"), direction = "add")

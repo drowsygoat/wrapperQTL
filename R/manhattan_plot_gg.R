@@ -18,7 +18,7 @@
 #'   Use \code{NA} (default) to omit the line.
 #' @param show_regions Logical; if \code{TRUE} (default) and both region columns are present
 #'   in \code{df}, shaded rectangles are drawn over those regions.
-#' @param region_alpha Alpha for region shading (0–1). Default \code{0.1}.
+#' @param region_alpha Alpha for region shading (0-1). Default \code{0.1}.
 #' @param col Two-color vector used to alternate chromosome point colors. Default
 #'   \code{c("gray40","gray60")}.
 #' @param point_size Point size for scatter layer. Default \code{1}.
@@ -53,9 +53,9 @@
 #' @export
 manhattan_plot_gg <- function(
   df,
-  chr_col = "Chromosome",
-  pos_col = "PeakPosition",
-  p_col   = "PeakPvalue",
+  chr_col = "chr",
+  pos_col = "location",
+  p_col   = "FDR_recal",
   region_start_col = "RegionStart",
   region_end_col   = "RegionEnd",
   sig.level = NA,
