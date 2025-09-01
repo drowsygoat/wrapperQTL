@@ -154,9 +154,17 @@ Example:
 find . -type d -name "*MEQTL_res*" -print0 | xargs -0 -I{} gather_ntests.R {}
 ```
 
+
 ---
 
-### 7. Post-Processing & Annotation
+### 7. Process Data
+
+------
+
+
+---
+
+### 8. Post-Processing & Annotation
 
 Finalize and annotate results with:
 
