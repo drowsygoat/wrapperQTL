@@ -13,22 +13,15 @@
 #' @param key_col Peak ID column in \code{results} for annotation. Default "peak_id".
 #' @param nearest_genes Logical; if TRUE, annotate nearest gene by TSS from a GTF. Default FALSE.
 #' @param gtf_file Path to GTF (plain or .gz). Required if \code{nearest_genes=TRUE} and \code{tss_gr} is NULL.
-#' @param nearest_on Compute nearest gene relative to \code{"peak"} (columns \code{chr, location}) or \code{"snp"} (\code{chr_snp, location_snp}). Default "peak".
+#' @param nearest_on Compute nearest gene relative to \code{"peak"} (columns \code{peak_chr, peak_center}) or \code{"snp"} (\code{chr_snp, location_snp}). Default "peak".
 #' @param nearest_output What to add: \code{"gene"}, \code{"distance"}, or \code{"both"}. Default "both".
 #' @param tss_gr Optional precomputed TSS GRanges (from \code{nearest_gene_from_gtf_build_tss()}) to speed up repeated calls.
 #' @param output_dir Directory for outputs when \code{write_outputs=TRUE}. Default ".".
 #' @param prefix Filename prefix for outputs. Default "qtl".
 #' @param write_outputs Logical; write CSVs and PDFs. Default FALSE.
 #'
-#' @return List:
-#' \itemize{
-#'   \item \code{filtered} – VCF-filtered results.
-#'   \item \code{peak_counts} – counts per QTL_type.
-#'   \item \code{cis_ranges}, \code{trans_ranges} – outputs from \code{peak_range()} (if used).
-#'   \item \code{cis}, \code{trans} – final tables (with optional FDR recalculation, rowData & nearest gene annotations).
-#'   \item \code{plot_files} – written plot paths (if any).
-#'   \item \code{tss} – the TSS GRanges used (if nearest_genes=TRUE).
-#' }
+#' @return List with elements \code{filtered}, \code{peak_counts}, \code{cis_ranges}, \code{trans_ranges},
+#'   \code{cis}, \code{trans}, \code{plot_files}, \code{tss}.
 #' @export
 run_qtl_workflow <- function(
   results,
@@ -68,18 +61,26 @@ run_qtl_workflow <- function(
     library(dplyr); library(ggplot2); library(tibble)
   })
 
-  # --- preprocess ---
+# --- preprocess ---
   res0 <- results %>%
     mutate(
+      # ensure join columns are the same types as in vcf_pos
+      chr_snp      = as.character(chr_snp),
+      location_snp = as.integer(location_snp),
+
       minus_log10_p   = -log10(pmax(p_value, .Machine$double.xmin)),
       minus_log10_FDR = if ("FDR" %in% names(.)) -log10(pmax(FDR, .Machine$double.xmin)) else NA_real_,
-      chr      = as.character(chr_snp),
-      location = as.integer(location_snp)
+      chr             = as.character(chr_snp),
+      location        = as.integer(location_snp)
     ) %>%
     as_tibble()
 
-  # --- VCF filter ---
-  vcf_pos  <- read_chr_pos_from_vcf(vcf_file)               # must return chr_snp, location_snp
+  # --- VCF filter (ensure type compatibility before join) ---
+  vcf_pos  <- read_chr_pos_from_vcf(vcf_file) %>%
+    mutate(
+      chr_snp = as.character(.data$chr_snp),
+      location_snp = as.integer(.data$location_snp)
+    )
   filtered <- inner_join(res0, vcf_pos, by = c("chr_snp","location_snp"))
 
   # --- peak counts + optional plot ---
@@ -112,8 +113,12 @@ run_qtl_workflow <- function(
 
   # --- peak_range (optional) ---
   if (apply_peak_range) {
-    cis_ranges   <- do.call(peak_range,   c(list(qtl_data = filt_cis),   peak_params))
-    trans_ranges <- do.call(peak_range,   c(list(qtl_data = filt_trans), peak_params))
+    # Ensure FDR exists for peak_range input
+    cis_for_peak   <- if (!"FDR" %in% names(filt_cis))   mutate(filt_cis,   FDR = p.adjust(p_value, "BH")) else filt_cis
+    trans_for_peak <- if (!"FDR" %in% names(filt_trans)) mutate(filt_trans, FDR = p.adjust(p_value, "BH")) else filt_trans
+
+    cis_ranges   <- do.call(peak_range,   c(list(qtl_data = cis_for_peak),   peak_params))
+    trans_ranges <- do.call(peak_range,   c(list(qtl_data = trans_for_peak), peak_params))
 
     cis_ranges   <- cis_ranges   %>% rename(chr = Chromosome, location = PeakPosition)
     trans_ranges <- trans_ranges %>% rename(chr = Chromosome, location = PeakPosition)
@@ -134,7 +139,10 @@ run_qtl_workflow <- function(
   # --- rowData annotation (optional) ---
   if (annotate_peaks) {
     cis_final   <- annotate_with_rowdata_peaks(cis_final,   se = se, key_col = key_col)
+    cis_final$peak_center <- as.integer(round((cis_final$peak_start + cis_final$peak_end) / 2))
+
     trans_final <- annotate_with_rowdata_peaks(trans_final, se = se, key_col = key_col)
+    trans_final$peak_center <- as.integer(round((trans_final$peak_start + trans_final$peak_end) / 2))
   }
 
   # --- nearest gene by TSS from GTF (optional) ---
@@ -152,11 +160,14 @@ run_qtl_workflow <- function(
         df$nearest_gene <- character(0); df$nearest_TSS_distance_bp <- integer(0); return(df)
       }
       if (nearest_on == "peak") {
-        chr_vec <- df$chr
-        pos_vec <- df$location
+        if (!annotate_peaks) stop("ATAC peaks are required for nearest_on='peak' (set annotate_peaks=TRUE).")
+        reqp <- c("peak_chr","peak_center")
+        if (!all(reqp %in% names(df))) stop("Missing required peak columns: ", paste(setdiff(reqp, names(df)), collapse = ", "))
+        chr_vec <- df$peak_chr
+        pos_vec <- as.integer(df$peak_center)
       } else { # snp
         chr_vec <- df$chr_snp
-        pos_vec <- df$location_snp
+        pos_vec <- as.integer(df$location_snp)
       }
 
       if (nearest_output == "gene") {
@@ -170,7 +181,6 @@ run_qtl_workflow <- function(
       } else { # both
         nb <- nearest_gene_from_gtf(gtf_file = NULL, chr = chr_vec, pos = pos_vec,
                                     output = "both", tss_gr = tss_used)
-        # nb has: query_chr, query_pos, gene_name, gene_strand, tss_pos, distance_bp, signed_distance_bp
         df$nearest_gene               <- nb$gene_name
         df$nearest_gene_strand        <- nb$gene_strand
         df$nearest_TSS_pos            <- as.integer(nb$tss_pos)
@@ -188,8 +198,19 @@ run_qtl_workflow <- function(
   if (write_outputs) {
     f_cis   <- file.path(output_dir, paste0(prefix, "_qtl_index_cis.pdf"))
     f_trans <- file.path(output_dir, paste0(prefix, "_qtl_index_trans.pdf"))
-    plot_qtl_index(cis_final,   use_neglog10 = TRUE, fdr_recal_col = if (recalc_fdr) "FDR_recal" else NULL, out_file = f_cis)
-    plot_qtl_index(trans_final, use_neglog10 = TRUE, fdr_recal_col = if (recalc_fdr) "FDR_recal" else NULL, out_file = f_trans)
+    # If we recalculated FDR, plot that as the FDR column
+    fdr_col_to_use <- if (recalc_fdr) "FDR_recal" else if ("FDR" %in% names(cis_final)) "FDR" else NULL
+    plot_qtl_index(cis_final,
+                   use_neglog10 = TRUE,
+                   fdr_col = fdr_col_to_use,
+                   fdr_recal_col = if (recalc_fdr) "FDR_recal" else NULL,
+                   out_file = f_cis)
+    fdr_col_to_use_t <- if (recalc_fdr) "FDR_recal" else if ("FDR" %in% names(trans_final)) "FDR" else NULL
+    plot_qtl_index(trans_final,
+                   use_neglog10 = TRUE,
+                   fdr_col = fdr_col_to_use_t,
+                   fdr_recal_col = if (recalc_fdr) "FDR_recal" else NULL,
+                   out_file = f_trans)
     plot_files["cis_index"]   <- f_cis
     plot_files["trans_index"] <- f_trans
   }
