@@ -1,12 +1,5 @@
 #!/usr/bin/env Rscript
 
-# wd <- getwd()
-
-# setwd("/cfs/klemming/projects/snic/sllstore2017078/lech")
-# source("/cfs/klemming/projects/snic/sllstore2017078/lech/renv/activate.R")
-
-# setwd(wd)
-
 # Load necessary libraries
 require(data.table)
 require(parallel)
@@ -18,8 +11,8 @@ require(cowplot)
 library(ggpubr) 
 library(argparse)
 
-library(pryr)       # for object_size()
-library(peakRAM) 
+# library(pryr)       # for object_size()
+# library(peakRAM) 
 
 # require(rasterpdf)
 # require(Cairo)
@@ -38,7 +31,6 @@ parse_args <- function() {
     parser$add_argument("directory", help = "Directory containing the files")
     parser$add_argument("prefix", help = "prefix")
     parser$add_argument("p_value_threshold", help = "p_value_threshold")
-
     args <- parser$parse_args()
     return(args)
 }
@@ -60,7 +52,6 @@ exists_and_not_empty <- function(directory_path) {
 }
 
 # Function to read and process ntests file
-
 read_ntests <- function(directory, pattern, prefix) {
     ntests_file <- list.files(directory, pattern = pattern, full.names = TRUE)
     ntests_file <- grep(prefix, ntests_file, value = TRUE)
@@ -73,58 +64,24 @@ read_ntests <- function(directory, pattern, prefix) {
     return(list(n_tests_cis = n_tests[[3]], n_tests_trans = n_tests[[2]]))
 }
 
-benchmark_chunked <- function(trans_files, p_val_threshold, tmp_path) {
-    unlink(file.path(tmp_path, "trans_*.rds"))  # clean up old files
-
-    result <- peakRAM({
-        for (f in trans_files) {
-            d <- load_and_filter(f, p_val_threshold)
-            if (!is.null(d)) {
-                saveRDS(d, file = file.path(tmp_path, paste0("trans_", basename(f), ".rds")))
-                rm(d); gc()
-            }
-        }
-
-        rds_files <- list.files(tmp_path, pattern = "^trans_.*\\.rds$", full.names = TRUE)
-        result_dt <- data.table::rbindlist(lapply(rds_files, readRDS), use.names = TRUE, fill = TRUE)
-        cat("Total rows:", nrow(result_dt), "\n")
-        cat("Object size:", format(pryr::object_size(result_dt), units = "MB"), "\n")
-    })
-    print(result)
-}
-
-benchmark_lapply <- function(trans_files, p_val_threshold) {
-    result <- peakRAM({
-        filtered <- lapply(trans_files, load_and_filter, p_val_threshold = p_val_threshold)
-        result_dt <- data.table::rbindlist(filtered, use.names = TRUE, fill = TRUE)
-        cat("Total rows:", nrow(result_dt), "\n")
-        cat("Object size:", format(pryr::object_size(result_dt), units = "MB"), "\n")
-    })
-    print(result)
-}
-
-# Function to adjust p-values and filter data
 load_and_filter <- function(file, p_val_threshold = NULL, threshold = "FDR", n_tests_for_p_adjust) {
 
     message("load_and_filter")
     
-    # message("time1")
     num_lines <- R.utils::countLines(file)[[1]]
-    # message("time2")
-    if (num_lines <= 2) { # change this if skipping line
+    if (num_lines <= 2) {
         message(paste("Skipping file due to insufficient lines:", file))
         return(NULL)
     }
 
     data <- fread(
         file,
-        header = FALSE, # make sure that the file is formatted forrectly (tab separated and with header)
-        skip = 1, ########
+        header = FALSE, # make sure that the file is formatted correctly (tab separated and with header)
+        skip = 1, # skip the first line if it is a header
         showProgress = TRUE,
         select = c(1, 2, 4, 5))
-    print(head(data))
 
-    # setnames(data, c("SNP", "gene", "p-value"), c("snp_id", "peak_id", "p_value"))
+    print(head(data))
 
     setnames(data, c("V1", "V2", "V4", "V5"), c("snp_id", "peak_id", "beta","p_value"))
 
@@ -147,9 +104,7 @@ load_and_filter <- function(file, p_val_threshold = NULL, threshold = "FDR", n_t
     if (threshold == "FWER") {
         data[, FWER := p.adjust(p_value, method = "FWER", n = n_tests_for_p_adjust)]
         data <- data[FWER < 0.1]
-
     } else {
-        
         data[, FDR := p.adjust(p_value, method = "BH", n = n_tests_for_p_adjust)]
         data <- data[FDR < 0.1]
     }
@@ -176,7 +131,7 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
 
 
     # Validate n_tests values
-    if (any(c(n_tests_trans, n_tests_cis) <= 1)) {q
+    if (any(c(n_tests_trans, n_tests_cis) <= 1)) {
         stop("Invalid n_tests value")
     }
     print("check1")
@@ -187,24 +142,6 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
 
     cis_files <- grep(prefix, cis_files, value = TRUE)
     trans_files <- grep(prefix, trans_files, value = TRUE)
-
-        # # Pick 10 files to test with
-        # test_trans_files <- head(trans_files, 10)
-        # test_threshold <- NULL
-        # temp_rds_dir <- file.path(results_path, "benchmark_rds")
-
-        # dir.create(temp_rds_dir, showWarnings = FALSE)
-
-        # cat("\n=== Method A: lapply ===\n")
-        # benchmark_lapply(test_trans_files, test_threshold)
-
-        # cat("\n=== Method B: chunked with saveRDS ===\n")
-        # benchmark_chunked(test_trans_files, test_threshold, temp_rds_dir)
-
-    print("cis_files")
-    print(cis_files)
-    print("trans_files")
-    print(trans_files)
 
     # Process TRANS files
     for (f in trans_files) {
@@ -236,14 +173,7 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
 
     
     print("head(eqtl_data_trans)")
-
     print(head(eqtl_data_trans))
-
-    # eqtl_data_cis <- mclapply(cis_files, load_and_filter, mc.cores = num_cores, mc.preschedule = FALSE)
-
-    # eqtl_data_cis <- lapply(cis_files, load_and_filter, p_val_threshold = p_val_threshold)
-    
-    # eqtl_data_cis <- rbindlist(eqtl_data_cis)
 
     print("head(eqtl_data_cis)")
 
@@ -265,8 +195,6 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
 
     saveRDS(overall_numbers, file = file.path(results_path, paste(prefix, "overall_numbers.rds", sep = "_")))
 
-    ######
-
     gc()
 
     bon_plotdata <- rbindlist(list(eqtl_data_cis, eqtl_data_trans))
@@ -280,7 +208,7 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
     bon_plotdata[, c("chr_snp", "location_snp") := tstrsplit(chr_location, ":", fixed = TRUE)]
     bon_plotdata[, location := as.integer(location_snp)]
     bon_plotdata[, chr_snp := paste0("chr", chr_snp)]
-    bon_plotdata <- bon_plotdata[nchar(chr_snp) < 6]
+    bon_plotdata <- bon_plotdata[nchar(chr_snp) < 6] # remove weird chr names
 
     print("1")
     print(head(bon_plotdata))
@@ -302,10 +230,8 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
     print(bon_plotdata[is.finite(-log10(get(check_column)))])
 
     non_finite_rows <- bon_plotdata[!is.finite(-log10(get(check_column)))]
-    print("3")
 
-    print("non_finite_rows")
-    print(non_finite_rows)
+    print("non_finite_rows_number")
     print(nrow(non_finite_rows))
 
     # Save non-finite rows if any exist
@@ -329,8 +255,6 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
 
     bon_plotdata[, (bin_column) := cut_width(-log10(get(check_column)), width = 1, center = 0.5)]
 
-    # bon_plotdata[, FDR_bins := cut_width(-log10(FDR), width = 1, center = 0.5)]
-
     print("4")
     # print(bon_plotdata)
 
@@ -344,9 +268,6 @@ process_eqtl_files <- function(directory, results_path, cis_pattern, trans_patte
     saveRDS(bon_plotdata, file = file.path(results_path, paste(prefix, "results.rds", sep = "_")))
 
 }
-############################
-quit(save = "no", status = 0)
-############################
 
 # part below redundant, causes memory issue, not needed to get QTLs
 
@@ -461,56 +382,25 @@ print("plot_results")
         plot + theme_minimal(base_size = 10) + common_theme
     })
 
-    # combined_plot <- plot_grid(plotlist = plotlist, labels = c("A", "B"), ncol = 1)
-
-    # combined_plot <<- plot_grid(plotlist = plotlist, labels = c("A", "B"), ncol = 1)
-
-    # Save the combined plot as a rasterized PDF using cairo_pdf
-    # rasterpdf::raster_pdf(file.path(directory, "combined_plot.pdf"), width = 10, height = 12, res = 300)
-    # print(combined_plot)
-    # dev.off()
-
-    # pdf(file.path(plots_dir, "combined_plot.pdf"))
-    # print(combined_plot)
-    # dev.off()
-
-    # combined_plot <- ggpubr::ggarrange(
-    #     common.legend = FALSE,
-    #     plotlist = p,
-    #     nrow = 1,
-    #     ncol = 1,
-    #     # labels = paste("Sample:", sample_name),
-    #     hjust = -0.2,
-    #     vjust = 1.6
-    # )
-
     ggpubr::ggexport(plotlist, filename = file.path(output_dir, "combined_plot.pdf"))
 }
 
 # Main function
 main <- function() {
+print("main")
 
-    if (! interactive()) {
         args <- parse_args()
         directory <- args$directory
         prefix <- args$prefix
         p_val_threshold <- args$p_val_threshold
 
 
-    } else {
-
-        directory <- getwd()
-        prefix <- "linear"
-        p_val_threshold <- NULL
-
-    }
-
     results_path <- file.path(directory, paste(prefix, "results", sep = "_"))
 
-    if (! exists_and_not_empty(results_path)) {
+    # if (! exists_and_not_empty(results_path)) {
 
         dir.create(file.path(results_path, "rds"), recursive = TRUE, showWarnings = FALSE)
-
+        print("here")
         process_eqtl_files(
             directory = directory,
             results_path = results_path,
@@ -520,9 +410,9 @@ main <- function() {
             prefix = prefix,
             threshold = "FDR",
             p_val_threshold = p_val_threshold)
-    } else {
-        message("Directory with results exists. Skipping step.")
-    }
+    # } else {
+    #     message("Directory with results exists. Skipping step.")
+    # }
 
      make_all_plots_data(
         results_path = results_path,
@@ -531,14 +421,14 @@ main <- function() {
     
     plots_path <- file.path(directory, paste(prefix, "plots", sep = "_"))
 
-    if (! exists_and_not_empty(plots_path)) {
+    # if (! exists_and_not_empty(plots_path)) {
 
         dir.create(plots_path, recursive = TRUE, showWarnings = FALSE)
 
         plot_results(input_dir = results_path, output_dir = plots_path, threshold = "FDR", prefix = prefix)
-    } else {
-        message("Directory with plots exists. Skipping step.")
-    }
+    # } else {
+    #     message("Directory with plots exists. Skipping step.")
+    # }
 }
 
 # Run the main function
