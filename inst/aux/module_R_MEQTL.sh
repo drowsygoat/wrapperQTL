@@ -2,7 +2,7 @@
 
 # MODULE PARAMETERS
 RUN_COMMAND="run_shell_command.sh"
-JOB_NAME="2gex_${1}"
+JOB_NAME="5atac_${1}"
 PARTITION="main"
 NODES=1
 TIME="23:59:00"
@@ -26,24 +26,21 @@ threads=1
 
 # covFilePath="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/toy_data/results_toy/merged_covariates.txt"
 
+# snp_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk/snp_chunks_rds"
 
+# features_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk"
 
-snp_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk/snp_chunks_rds"
+# snp_loc_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk/snp_chunks_rds"
 
-features_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk"
+# features_loc_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk"
 
-snp_loc_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk/snp_chunks_rds"
+snp_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters/snp_chunks_rds"
 
-features_loc_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk"
+features_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters"
 
+snp_loc_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters/snp_chunks_rds"
 
-# snp_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters/snp_chunks_rds"
-
-# features_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters"
-
-# snp_loc_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters/snp_chunks_rds"
-
-# features_loc_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters"
+features_loc_path="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters"
 
 # Check if directories exist
 if [ ! -d "$snp_path" ]; then
@@ -78,9 +75,9 @@ process_file() {
     echo "$input"
     echo "$output"
 
-    # covFilePath="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters/${input}/merged_covariates.txt"
+    covFilePath="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_05_002_20chk_ATAC_all_clusters/${input}/merged_covariates.txt"
 
-    covFilePath="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk/${input}/merged_covariates.txt"
+    # covFilePath="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/real_data/results_log_norm_08_0_4chk/${input}/merged_covariates.txt"
 
     # Check if file exists
     if [ ! -f "$covFilePath" ]; then
@@ -92,7 +89,7 @@ process_file() {
 
     export R_LIBS_USER="/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/seurat_gal7/lib"
 
-    $RUN_COMMAND -J "$JOB_NAME" -p "$PARTITION" -n "$TASKS" -t "$TIME" -N "$NODES" -c "$CPUS" -d "$DRY" -- 'docker_sing.sh -B /cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/ -H /cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/singularity_sandboxes/home_rsc -s -c -d drowsygoat/rsc Rscript $R_SCRIPT $input $output $snp_path $snp_loc_path $features_path $features_loc_path $covFilePath --threads $threads --verbose --colNames_convention "1" "_"'
+    $RUN_COMMAND -J "$JOB_NAME" -p "$PARTITION" -n "$TASKS" -t "$TIME" -N "$NODES" -c "$CPUS" -d "$DRY" -- 'docker_sing.sh -B /cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/ -H /cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/singularity_sandboxes/home_rsc -s -c -d drowsygoat/css Rscript $R_SCRIPT $input $output $snp_path $snp_loc_path $features_path $features_loc_path $covFilePath --threads $threads --verbose --colNames_convention "2" "_x_"'
 }
 
 input_directory=${1:-.}  # Defaults to current directory if no argument is given
@@ -101,4 +98,4 @@ output_directory="${features_path}/${input_directory}"
 
 process_file $input_directory $output_directory
 
-# example usage: >module_R_MEQTL.sh group_C7_results (in this case the input directory is group_C7_results (must be in surrent directory) and the output will be in features_path/group_C7_results (subdirectory of group_C7_results in features_path))
+# example usage: >module_R_MEQTL.sh group_C7_results (in this case the input directory is group_C7_results (must be in current directory) and the output will be in features_path/group_C7_results (subdirectory of group_C7_results in features_p

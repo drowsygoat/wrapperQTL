@@ -5,7 +5,9 @@ library(MatrixEQTL)
 library(parallel)
 library(R.utils)
 library(futile.logger)
-library(wrapperQTL)
+# library(wrapperQTL)
+
+devtools::load_all("/cfs/klemming/projects/supr/sllstore2017078/kaczma-workingdir/RR/scAnalysis/QTL_analysis/wrapperQTL")
 
 # Define command-line arguments
 parser <- ArgumentParser(description = 'Process QTL analysis arguments')

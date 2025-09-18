@@ -14,6 +14,8 @@
 #'     \item{\code{FDR}}{Adjusted p-value (numeric); smaller is more significant.}
 #'   }
 #'   Additional columns are ignored.
+#' @param fdr_col Character scalar. Name of the column in \code{qtl_data}
+#'   containing the (adjusted) p-values used for peak finding (default \code{"FDR"}).
 #'
 #' @param METHOD Character scalar. Range-building strategy:
 #'   \itemize{
@@ -30,17 +32,13 @@
 #' @param SIGTHRESHOLD Numeric in (0,1]. Global significance cutoff for peaks.
 #'   Iterations stop when the current best (minimum) p-value exceeds this threshold.
 #'   Default \code{0.01}.
-#'
 #' @param SEARCHDISTANCE Numeric (bp). For \code{"DistanceFromPeak"}, the maximum
 #'   absolute distance from the peak position. For \code{"AdjacentPoints"}, the
 #'   maximum gap allowed between consecutive significant positions while extending
 #'   upstream/downstream. Default \code{3e6}.
-#'
 #' @param LOCALPEAKTHRESHOLD Numeric > 0. The dynamic threshold factor relative to the
 #'   local peak p-value; a value of \code{0.01} means points are considered locally
-#'   significant if \code{p <= PEAKVALUE / 0.01} (i.e., up to two orders of magnitude
-#'   less significant than the peak). Default \code{0.01}.
-#'
+#'   significant if \code{p <= PEAKVALUE / 0.01}. Default \code{0.01}.
 #' @param MINGAPSIZE Non-negative numeric (bp). Adjacent/overlapping ranges with a gap
 #'   \eqn{\le} \code{MINGAPSIZE} are merged. Default \code{0}.
 #'
@@ -56,55 +54,28 @@
 #'     \item{\code{RegionLength}}{Computed as \code{RegionEnd - RegionStart + 1}.}
 #'   }
 #'
-#' @details
-#' The algorithm loops per chromosome: pick the minimum p-value (the peak);
-#' construct a candidate range around it using \code{METHOD} and local dynamic
-#' threshold; remove covered rows; repeat until no positions with
-#' \code{p <= SIGTHRESHOLD} remain. Finally, overlapping/nearby ranges are merged
-#' with tolerance \code{MINGAPSIZE}.
-#'
-#' @section Assumptions:
-#' \itemize{
-#'   \item Positions are on the same coordinate system and comparable within a chromosome.
-#'   \item For reproducibility and performance, positions within each chromosome should be sorted ascending.
-#'   \item \code{qtl_data$FDR} contains the p-values to be used (adjusted). If you wish to use raw p-values,
-#'         pass them in the same column or rename accordingly.
-#' }
-#'
-#' @examples
-#' \dontrun{
-#' out <- peak_range(qtl_data, METHOD = "DistanceFromPeak",
-#'                   SIGTHRESHOLD = 0.01, SEARCHDISTANCE = 1e6,
-#'                   LOCALPEAKTHRESHOLD = 0.01, MINGAPSIZE = 5e3)
-#' head(out)
-#' }
-#'
 #' @export
 peak_range <- function(
-  qtl_data,                 # overall_results_table
-  METHOD = "DistanceFromPeak",  # Method used to obtain ranges: DistanceFromPeak, AdjacentPoints.
-  SIGTHRESHOLD = 0.01,          # P-value significance threshold. Stop searching for peaks if the p-value of the next peak is above SIGTHRESHOLD.
-  SEARCHDISTANCE = 3e+6,        # Maximum distance from local peak (if DistanceFromPeak method), or maximum distance between adjacent significant points (if AdjacentPoints method).
-  LOCALPEAKTHRESHOLD = 0.01,    # Relative threshold of local peak (0.01 represents 2 orders of magnitude).
-  MINGAPSIZE = 0                # Minimum size of gaps between ranges. Adjacent ranges with a gap <= MINGAPSIZE will be merged.
+  qtl_data,                     # overall_results_table
+  fdr_col = "FDR",              # NEW: which column to use for (adjusted) p-values
+  METHOD = "DistanceFromPeak",  # DistanceFromPeak or AdjacentPoints
+  SIGTHRESHOLD = 0.01,          # Stop if next peak's p-value > SIGTHRESHOLD
+  SEARCHDISTANCE = 3e+6,        # Max distance from peak (or max gap between adjacent points)
+  LOCALPEAKTHRESHOLD = 0.01,    # Local threshold factor relative to peak p
+  MINGAPSIZE = 0                # Merge ranges with gaps <= MINGAPSIZE
 ) {
-  # 1. Find peak position (lowest p-value).
-  # 2. Set local peak p-value threshold (e.g., 0.01 = two orders of magnitude below local peak) to limit local peak height.
-  # 3. DistanceFromPeak: Find the farthest significant points (below local peak p-value threshold) within the defined
-  #    distance from local peak. This method limits the extension of the region, without limiting the gap between adjacent significant points.
-  # 3. AdjacentPoints: Find the farthest significant points (below local peak p-value threshold) upstream/downstream
-  #    the last picked point upstream/downstream the local peak. This method limits the gap between adjacent significant points, not
-  #    the extension of the total regions.
-  # 4. Save peak and range.
-  # 5. Remove range from data.
-  # 6. Go back to step 1.
-
   library(tidyverse)
   library(data.table)
 
-  CHRVECTOR <- qtl_data$chr_snp   # Vector of chromosomes.
-  POSVECTOR <- qtl_data$location  # Vector of chromosomal positions.
-  PVALUEVECTOR <- qtl_data$FDR    # Vector of p-values (FDR).
+  # Pull required vectors
+  CHRVECTOR    <- qtl_data$chr_snp
+  POSVECTOR    <- qtl_data$location
+
+  if (!fdr_col %in% names(qtl_data))
+    stop("Column '", fdr_col, "' not found in qtl_data.")
+  PVALUEVECTOR <- qtl_data[[fdr_col]]
+  if (!is.numeric(PVALUEVECTOR))
+    stop("Column '", fdr_col, "' must be numeric.")
 
   if (missing(CHRVECTOR)) {
     CHRVECTOR <- rep("ChromosomeC", length(POSVECTOR))
@@ -112,193 +83,143 @@ peak_range <- function(
 
   INPUTDATA <- data.frame(
     Chromosome = CHRVECTOR,
-    Position = POSVECTOR,
-    Pvalue = PVALUEVECTOR
+    Position   = POSVECTOR,
+    Pvalue     = PVALUEVECTOR
   )
 
   # Create output data frame.
   OUTPUT <- data.frame(
-    Chromosome = NA,
+    Chromosome   = NA,
     PeakPosition = NA,
-    PeakPvalue = NA,
-    RegionStart = NA,
-    RegionEnd = NA,
-    NPeaks = NA,
+    PeakPvalue   = NA,
+    RegionStart  = NA,
+    RegionEnd    = NA,
+    NPeaks       = NA,
     NSignificant = NA
   )
 
   for (C in unique(INPUTDATA$Chromosome)) {
-    # Get data for chromosome C.
+
     DATA_CHRC <- INPUTDATA %>%
       dplyr::filter(Chromosome == C) %>%
       dplyr::arrange(Position)
 
-    # Create output data frame.
     OUTPUT_CHRC <- data.frame(
-      Chromosome = NA,
+      Chromosome   = NA,
       PeakPosition = NA,
-      PeakPvalue = NA,
-      RegionStart = NA,
-      RegionEnd = NA
+      PeakPvalue   = NA,
+      RegionStart  = NA,
+      RegionEnd    = NA
     )
 
-    # Continue searching while there are significant positions that haven't been assigned to a range.
     while (nrow(DATA_CHRC) > 0) {
-      # Find peak value.
       PEAKVALUE <- min(DATA_CHRC$Pvalue)
-
-      # No meaningful peaks left.
       if (PEAKVALUE > SIGTHRESHOLD) break
 
-      # Local peak dynamic threshold.
       X <- PEAKVALUE / LOCALPEAKTHRESHOLD
-      # if (X > SIGTHRESHOLD) { X <- SIGTHRESHOLD }
-
-      # Find all peak indices.
       PEAKINDICES <- which(DATA_CHRC$Pvalue == PEAKVALUE)
 
       if (METHOD == "DistanceFromPeak") {
-        # Find ranges around each peak.
         RANGES_CHRC <- lapply(PEAKINDICES, function(idx) {
           PEAKPOSITION <- DATA_CHRC$Position[idx]
-          PEAKPVALUE <- DATA_CHRC$Pvalue[idx]
+          PEAKPVALUE   <- DATA_CHRC$Pvalue[idx]
           DATASUBSET <- DATA_CHRC %>%
             dplyr::filter(
               Position >= (PEAKPOSITION - SEARCHDISTANCE),
               Position <= (PEAKPOSITION + SEARCHDISTANCE)
             )
-
-          # Search upstream peak.
-          LEFTLIMIT <- min(DATASUBSET$Position[DATASUBSET$Pvalue <= X])
-          # Search downstream peak.
+          LEFTLIMIT  <- min(DATASUBSET$Position[DATASUBSET$Pvalue <= X])
           RIGHTLIMIT <- max(DATASUBSET$Position[DATASUBSET$Pvalue <= X])
-
-          return(c(PEAKPOSITION, PEAKPVALUE, LEFTLIMIT, RIGHTLIMIT))
-        })
-
-        RANGES_CHRC <- do.call(rbind, RANGES_CHRC)
-        RANGES_CHRC <- as.data.frame(RANGES_CHRC) %>%
+          c(PEAKPOSITION, PEAKPVALUE, LEFTLIMIT, RIGHTLIMIT)
+        }) %>% do.call(rbind, .) %>% as.data.frame() %>%
           dplyr::mutate(Chromosome = C)
-        colnames(RANGES_CHRC) <- c("PeakPosition", "PeakPvalue", "RegionStart", "RegionEnd", "Chromosome")
+        colnames(RANGES_CHRC) <- c("PeakPosition","PeakPvalue","RegionStart","RegionEnd","Chromosome")
       }
 
       if (METHOD == "AdjacentPoints") {
-        # Find ranges around each peak.
         RANGES_CHRC <- lapply(PEAKINDICES, function(idx) {
           PEAKPOSITION <- DATA_CHRC$Position[idx]
-          PEAKPVALUE <- DATA_CHRC$Pvalue[idx]
-          DATASUBSET <- DATA_CHRC %>%
-            dplyr::filter(
-              Position >= (PEAKPOSITION - SEARCHDISTANCE),
-              Position <= (PEAKPOSITION + SEARCHDISTANCE)
-            )
+          PEAKPVALUE   <- DATA_CHRC$Pvalue[idx]
 
-          # Search upstream peak.
-          CONTINUE <- TRUE
+          CONTINUE  <- TRUE
           LEFTLIMIT <- PEAKPOSITION
-          while (CONTINUE == TRUE) {
+          while (CONTINUE) {
             DATASUBSET <- DATA_CHRC %>%
               dplyr::filter(
                 Position >= (LEFTLIMIT - SEARCHDISTANCE),
                 Position < LEFTLIMIT
               )
-            if (nrow(DATASUBSET) > 0) {
-              if (sum(DATASUBSET$Pvalue <= X) > 0) {
-                LEFTLIMIT <- min(DATASUBSET$Position[DATASUBSET$Pvalue <= X])
-              } else {
-                CONTINUE <- FALSE
-              }
-            } else {
-              CONTINUE <- FALSE
-            }
+            if (nrow(DATASUBSET) > 0 && any(DATASUBSET$Pvalue <= X)) {
+              LEFTLIMIT <- min(DATASUBSET$Position[DATASUBSET$Pvalue <= X])
+            } else CONTINUE <- FALSE
           }
 
-          # Search downstream peak.
-          CONTINUE <- TRUE
+          CONTINUE   <- TRUE
           RIGHTLIMIT <- PEAKPOSITION
-          while (CONTINUE == TRUE) {
+          while (CONTINUE) {
             DATASUBSET <- DATA_CHRC %>%
               dplyr::filter(
                 Position > RIGHTLIMIT,
                 Position <= (RIGHTLIMIT + SEARCHDISTANCE)
               )
-            if (nrow(DATASUBSET) > 0) {
-              if (sum(DATASUBSET$Pvalue <= X) > 0) {
-                RIGHTLIMIT <- max(DATASUBSET$Position[DATASUBSET$Pvalue <= X])
-              } else {
-                CONTINUE <- FALSE
-              }
-            } else {
-              CONTINUE <- FALSE
-            }
+            if (nrow(DATASUBSET) > 0 && any(DATASUBSET$Pvalue <= X)) {
+              RIGHTLIMIT <- max(DATASUBSET$Position[DATASUBSET$Pvalue <= X])
+            } else CONTINUE <- FALSE
           }
 
-          return(c(PEAKPOSITION, PEAKPVALUE, LEFTLIMIT, RIGHTLIMIT))
-        })
-
-        RANGES_CHRC <- do.call(rbind, RANGES_CHRC)
-        RANGES_CHRC <- as.data.frame(RANGES_CHRC) %>%
+          c(PEAKPOSITION, PEAKPVALUE, LEFTLIMIT, RIGHTLIMIT)
+        }) %>% do.call(rbind, .) %>% as.data.frame() %>%
           dplyr::mutate(Chromosome = C)
-        colnames(RANGES_CHRC) <- c("PeakPosition", "PeakPvalue", "RegionStart", "RegionEnd", "Chromosome")
+        colnames(RANGES_CHRC) <- c("PeakPosition","PeakPvalue","RegionStart","RegionEnd","Chromosome")
       }
 
-      # Save ranges.
       OUTPUT_CHRC <- rbind(OUTPUT_CHRC, RANGES_CHRC)
 
-      # Remove ranges from the data.
       for (i in 1:nrow(RANGES_CHRC)) {
         DATA_CHRC <- DATA_CHRC %>%
-          dplyr::filter(!(Position >= RANGES_CHRC$RegionStart[i] & Position <= RANGES_CHRC$RegionEnd[i]))
+          dplyr::filter(!(Position >= RANGES_CHRC$RegionStart[i] &
+                          Position <= RANGES_CHRC$RegionEnd[i]))
       }
     }
 
-    # Merge overlapping regions.
-    # If several peaks with the same p-value exist within a range, repeat range for each peak.
     if (nrow(OUTPUT_CHRC[!is.na(OUTPUT_CHRC$PeakPosition), ]) > 0) {
       OUTPUT_CHRC <- OUTPUT_CHRC %>%
         dplyr::filter(!is.na(Chromosome)) %>%
         dplyr::arrange(RegionStart) %>%
         dplyr::group_by(
           Index = cumsum(
-            cummax(dplyr::lag(RegionEnd + MINGAPSIZE / 2, default = data.table::first(RegionEnd + MINGAPSIZE / 2))) <
+            cummax(dplyr::lag(RegionEnd + MINGAPSIZE / 2,
+                              default = data.table::first(RegionEnd + MINGAPSIZE / 2))) <
               (RegionStart - MINGAPSIZE / 2)
           )
         ) %>%
         dplyr::summarise(
-          RegionStart = min(RegionStart),
-          RegionEnd = max(RegionEnd),
+          RegionStart  = min(RegionStart),
+          RegionEnd    = max(RegionEnd),
           PeakPosition = PeakPosition[PeakPvalue == min(PeakPvalue)],
-          PeakPvalue = min(PeakPvalue),
-          NPeaks = dplyr::n()
+          PeakPvalue   = min(PeakPvalue),
+          NPeaks       = dplyr::n()
         ) %>%
         dplyr::mutate(Chromosome = C) %>%
         as.data.frame()
 
-      OUTPUT_CHRC <- OUTPUT_CHRC[, c("Chromosome", "PeakPosition", "PeakPvalue", "RegionStart", "RegionEnd", "NPeaks")]
+      OUTPUT_CHRC <- OUTPUT_CHRC[, c("Chromosome","PeakPosition","PeakPvalue","RegionStart","RegionEnd","NPeaks")]
 
-      # Get number of significant points per region.
       DATA_CHRC <- INPUTDATA %>%
-        dplyr::filter(
-          Chromosome == C,
-          Pvalue <= SIGTHRESHOLD
-        )
+        dplyr::filter(Chromosome == C, Pvalue <= SIGTHRESHOLD)
 
       OUTPUT_CHRC$NSignificant <- NA_integer_
       for (i in 1:nrow(OUTPUT_CHRC)) {
         OUTPUT_CHRC$NSignificant[i] <- DATA_CHRC %>%
-          dplyr::filter(
-            Position >= OUTPUT_CHRC$RegionStart[i],
-            Position <= OUTPUT_CHRC$RegionEnd[i]
-          ) %>%
+          dplyr::filter(Position >= OUTPUT_CHRC$RegionStart[i],
+                        Position <= OUTPUT_CHRC$RegionEnd[i]) %>%
           nrow()
       }
 
-      # Save ranges.
       OUTPUT <- rbind(OUTPUT, OUTPUT_CHRC)
     }
   }
 
-  # Remove NA entries.
   OUTPUT <- OUTPUT %>%
     dplyr::filter(!is.na(PeakPosition)) %>%
     dplyr::arrange(Chromosome, PeakPvalue)

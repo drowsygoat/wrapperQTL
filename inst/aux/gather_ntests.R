@@ -1,12 +1,15 @@
 #!/usr/bin/env Rscript
 
+suppressPackageStartupMessages({
+  library(argparse)
+  library(dplyr)
+})
+
+# Parse CLI arguments only
 parse_args <- function() {
   parser <- argparse::ArgumentParser(description = "Process eQTL files")
 
-  # required positional
   parser$add_argument("directory", help = "Directory containing the files")
-
-  # optional flags with defaults
   parser$add_argument("--pattern",
                       default = "ntests\\.txt",
                       help = "Regex pattern to match files [default: %(default)s]")
@@ -14,33 +17,11 @@ parse_args <- function() {
                       default = "defaultprefix",
                       help = "Prefix to filter files [default: %(default)s]")
 
-  args <- parser$parse_args()
-  return(args)
+  parser$parse_args()
 }
 
-#' Gather and Summarize eQTL Test Counts
-#'
-#' Reads multiple "ntests" files from a directory, filters by pattern and prefix,
-#' and outputs the sum of test counts (all, trans, cis).
-#'
-#' @param directory A character string specifying the path to the directory containing files.
-#' @param pattern A regex pattern to match files (default: "ntests\\\\.txt").
-#' @param prefix A string to further filter matched files (default: "defaultprefix").
-#'
-#' @return A data.frame with one row and columns: `all`, `trans`, `cis`.
-#' Also writes the result to a file named `{prefix}_ntests_combined.txt` in the given directory.
-#'
-#' @examples
-#' \dontrun{
-#' gather_ntests("results/", "ntests\\.txt", "run1")
-#' }
-#'
-#' @export
-gather_ntests <- function(directory, pattern = "ntests\\.txt", prefix = "defaultprefix") {
-  # Treat empty strings as "use default"
-  if (is.null(pattern) || identical(pattern, "")) pattern <- "ntests\\.txt"
-  if (is.null(prefix)  || identical(prefix,  "")) prefix  <- "defaultprefix"
-
+# Gather and Summarize eQTL Test Counts
+gather_ntests <- function(directory, pattern, prefix) {
   files <- list.files(path = directory, pattern = pattern, full.names = TRUE)
   files <- grep(prefix, files, value = TRUE)
 
@@ -56,7 +37,6 @@ gather_ntests <- function(directory, pattern = "ntests\\.txt", prefix = "default
     cat("Processing file", file_counter, ":", file, "\n")
 
     data <- read.table(file, header = FALSE, sep = " ")
-    # ensure we only keep first three columns (all, trans, cis) and coerce numeric
     data <- data[, seq_len(min(3, ncol(data))), drop = FALSE]
     data[] <- lapply(data, as.numeric)
 
@@ -70,7 +50,6 @@ gather_ntests <- function(directory, pattern = "ntests\\.txt", prefix = "default
   }
 
   summed_data <- colSums(combined_data, na.rm = TRUE)
-  # pad to length 3 in case some files had fewer columns
   if (length(summed_data) < 3) summed_data <- c(summed_data, rep(0, 3 - length(summed_data)))
 
   result <- data.frame(all = summed_data[1], trans = summed_data[2], cis = summed_data[3])
@@ -82,19 +61,16 @@ gather_ntests <- function(directory, pattern = "ntests\\.txt", prefix = "default
   return(result)
 }
 
-# Main function to handle arguments and call the gather_ntests function
-#' @keywords internal
+# Main CLI entry point
 main <- function() {
   args <- parse_args()
   result <- gather_ntests(args$directory, args$pattern, args$prefix)
   print(result)
 }
 
-# Only run main() if the script is executed directly
-if (sys.nframe() == 0) {
-  suppressPackageStartupMessages({
-    library(argparse)
-    library(dplyr)
-  })
+# Force CLI-only execution
+if (!interactive()) {
   main()
+} else {
+  stop("This script is intended to be run from the command line, not interactively.")
 }

@@ -61,7 +61,7 @@ run_qtl_workflow <- function(
     library(dplyr); library(ggplot2); library(tibble)
   })
 
-# --- preprocess ---
+  # --- preprocess ---
   res0 <- results %>%
     mutate(
       # ensure join columns are the same types as in vcf_pos
@@ -78,9 +78,14 @@ run_qtl_workflow <- function(
   # --- VCF filter (ensure type compatibility before join) ---
   vcf_pos  <- read_chr_pos_from_vcf(vcf_file) %>%
     mutate(
-      chr_snp = as.character(.data$chr_snp),
+      chr_snp      = as.character(.data$chr_snp),
       location_snp = as.integer(.data$location_snp)
     )
+  
+    print(head("res0"))
+    print(head("vcf_pos"))
+    print(head(res0))
+    print(head(vcf_pos))
   filtered <- inner_join(res0, vcf_pos, by = c("chr_snp","location_snp"))
 
   # --- peak counts + optional plot ---
@@ -107,33 +112,74 @@ run_qtl_workflow <- function(
   filt_cis   <- filtered %>% filter(QTL_type == "cis")
   filt_trans <- filtered %>% filter(QTL_type == "trans")
 
-  cis_ranges <- trans_ranges <- NULL
-  cis_final  <- filt_cis
-  trans_final <- filt_trans
+  cis_ranges  <- NULL
+  trans_ranges <- NULL
+  cis_final    <- filt_cis
+  trans_final  <- filt_trans
 
-  # --- peak_range (optional) ---
-  if (apply_peak_range) {
-    # Ensure FDR exists for peak_range input
-    cis_for_peak   <- if (!"FDR" %in% names(filt_cis))   mutate(filt_cis,   FDR = p.adjust(p_value, "BH")) else filt_cis
-    trans_for_peak <- if (!"FDR" %in% names(filt_trans)) mutate(filt_trans, FDR = p.adjust(p_value, "BH")) else filt_trans
-
-    cis_ranges   <- do.call(peak_range,   c(list(qtl_data = cis_for_peak),   peak_params))
-    trans_ranges <- do.call(peak_range,   c(list(qtl_data = trans_for_peak), peak_params))
-
-    cis_ranges   <- cis_ranges   %>% rename(chr = Chromosome, location = PeakPosition)
-    trans_ranges <- trans_ranges %>% rename(chr = Chromosome, location = PeakPosition)
-
-    cis_final   <- inner_join(cis_ranges,   filt_cis,   by = c("chr","location")) %>% as_tibble()
-    trans_final <- inner_join(trans_ranges, filt_trans, by = c("chr","location")) %>% as_tibble()
-  }
-
-  # --- FDR recalculation (optional) ---
+  # --- FDR recalculation (optional, on the tables we carry forward) ---
   if (recalc_fdr) {
     recalc <- function(df, p_col = "p_value", out_col = "FDR_recal") {
       df[[out_col]] <- p.adjust(df[[p_col]], method = "BH"); df
     }
     cis_final   <- recalc(cis_final)
     trans_final <- recalc(trans_final)
+  }
+
+  # --- peak_range (optional) ---
+  if (apply_peak_range) {
+    if (recalc_fdr) {
+      # Use FDR_recal for peak picking (compute if somehow missing)
+      cis_for_peak   <- if (!"FDR_recal" %in% names(cis_final))   mutate(cis_final,   FDR_recal = p.adjust(p_value, "BH")) else cis_final
+      trans_for_peak <- if (!"FDR_recal" %in% names(trans_final)) mutate(trans_final, FDR_recal = p.adjust(p_value, "BH")) else trans_final
+      fdr_col_use <- "FDR_recal"
+    } else {
+      # Use (or create) FDR for peak picking
+      cis_for_peak   <- if (!"FDR" %in% names(cis_final))   mutate(cis_final,   FDR = p.adjust(p_value, "BH")) else cis_final
+      trans_for_peak <- if (!"FDR" %in% names(trans_final)) mutate(trans_final, FDR = p.adjust(p_value, "BH")) else trans_final
+      fdr_col_use <- "FDR"
+    }
+
+    # run peak_range() with the appropriate p-value column
+    cis_ranges_raw   <- do.call(peak_range, c(list(qtl_data = cis_for_peak,   fdr_col = fdr_col_use), peak_params))
+    trans_ranges_raw <- do.call(peak_range, c(list(qtl_data = trans_for_peak, fdr_col = fdr_col_use), peak_params))
+
+    # helper to normalize ranges into a typed tibble (or typed empty tibble)
+    normalize_ranges <- function(rng) {
+      if (is.null(rng) || nrow(rng) == 0L) {
+        # return an empty tibble with correctly typed join keys
+        return(tibble::tibble(
+          chr = character(),
+          location = integer()
+        ))
+      }
+      rng %>%
+        dplyr::transmute(
+          chr        = as.character(.data$Chromosome),
+          location   = as.integer(.data$PeakPosition),
+          RegionStart,
+          RegionEnd,
+          PeakPvalue,
+          NPeaks,
+          NSignificant,
+          RegionLength
+        )
+    }
+
+    cis_ranges   <- normalize_ranges(cis_ranges_raw)
+    trans_ranges <- normalize_ranges(trans_ranges_raw)
+
+    # only join back when we actually have any ranges; otherwise leave *_final as-is
+    if (nrow(cis_ranges) > 0L) {
+      cis_final <- dplyr::as_tibble(
+        dplyr::inner_join(cis_ranges, cis_final, by = c("chr","location"))
+      )
+    }
+    if (nrow(trans_ranges) > 0L) {
+      trans_final <- dplyr::as_tibble(
+        dplyr::inner_join(trans_ranges, trans_final, by = c("chr","location"))
+      )
+    }
   }
 
   # --- rowData annotation (optional) ---
@@ -156,7 +202,7 @@ run_qtl_workflow <- function(
     }
 
     add_nearest <- function(df) {
-      if (!nrow(df)) {
+      if (nrow(df) == 0L) {
         df$nearest_gene <- character(0); df$nearest_TSS_distance_bp <- integer(0); return(df)
       }
       if (nearest_on == "peak") {
@@ -179,8 +225,7 @@ run_qtl_workflow <- function(
                                     output = "distance", tss_gr = tss_used)
         df$nearest_TSS_distance_bp <- as.integer(nd)
       } else { # both
-        nb <- nearest_gene_from_gtf(gtf_file = NULL, chr = chr_vec, pos = pos_vec,
-                                    output = "both", tss_gr = tss_used)
+        nb <- nearest_gene_from_gtf(gtf_file = NULL, chr = chr_vec, pos = pos_vec, output = "both", tss_gr = tss_used)
         df$nearest_gene               <- nb$gene_name
         df$nearest_gene_strand        <- nb$gene_strand
         df$nearest_TSS_pos            <- as.integer(nb$tss_pos)
@@ -194,31 +239,45 @@ run_qtl_workflow <- function(
     trans_final <- add_nearest(trans_final)
   }
 
-  # --- index plots (optional) ---
+  # --- index plots (optional, robust even if FDR columns are absent) ---
   if (write_outputs) {
     f_cis   <- file.path(output_dir, paste0(prefix, "_qtl_index_cis.pdf"))
     f_trans <- file.path(output_dir, paste0(prefix, "_qtl_index_trans.pdf"))
-    # If we recalculated FDR, plot that as the FDR column
-    fdr_col_to_use <- if (recalc_fdr) "FDR_recal" else if ("FDR" %in% names(cis_final)) "FDR" else NULL
-    plot_qtl_index(cis_final,
-                   use_neglog10 = TRUE,
-                   fdr_col = fdr_col_to_use,
-                   fdr_recal_col = if (recalc_fdr) "FDR_recal" else NULL,
-                   out_file = f_cis)
-    fdr_col_to_use_t <- if (recalc_fdr) "FDR_recal" else if ("FDR" %in% names(trans_final)) "FDR" else NULL
-    plot_qtl_index(trans_final,
-                   use_neglog10 = TRUE,
-                   fdr_col = fdr_col_to_use_t,
-                   fdr_recal_col = if (recalc_fdr) "FDR_recal" else NULL,
-                   out_file = f_trans)
+
+    # CIS: ensure we have an 'FDR' column for plotting
+    cis_plot_df <- cis_final
+    if (recalc_fdr && "FDR_recal" %in% names(cis_plot_df)) {
+      cis_plot_df <- dplyr::mutate(cis_plot_df, FDR = .data$FDR_recal)
+    } else if (!"FDR" %in% names(cis_plot_df)) {
+      cis_plot_df <- dplyr::mutate(cis_plot_df, FDR = p.adjust(p_value, "BH"))
+    }
+    plot_p_vals(cis_plot_df,
+                  use_neglog10 = TRUE,
+                  fdr_col = "FDR",
+                  fdr_recal_col = NULL,
+                  out_file = f_cis)
+
+    # TRANS: same normalization
+    trans_plot_df <- trans_final
+    if (recalc_fdr && "FDR_recal" %in% names(trans_plot_df)) {
+      trans_plot_df <- dplyr::mutate(trans_plot_df, FDR = .data$FDR_recal)
+    } else if (!"FDR" %in% names(trans_plot_df)) {
+      trans_plot_df <- dplyr::mutate(trans_plot_df, FDR = p.adjust(p_value, "BH"))
+    }
+    plot_p_vals(trans_plot_df,
+                  use_neglog10 = TRUE,
+                  fdr_col = "FDR",
+                  fdr_recal_col = NULL,
+                  out_file = f_trans)
+
     plot_files["cis_index"]   <- f_cis
     plot_files["trans_index"] <- f_trans
   }
 
   # --- CSV outputs (optional) ---
   if (write_outputs) {
-    if (!is.null(cis_ranges))   write.csv(cis_ranges,   file.path(output_dir, paste0(prefix, "_cis_ranges.csv")),   row.names = FALSE)
-    if (!is.null(trans_ranges)) write.csv(trans_ranges, file.path(output_dir, paste0(prefix, "_trans_ranges.csv")), row.names = FALSE)
+    # if (!is.null(cis_ranges))   write.csv(cis_ranges,   file.path(output_dir, paste0(prefix, "_cis_ranges.csv")),   row.names = FALSE)
+    # if (!is.null(trans_ranges)) write.csv(trans_ranges, file.path(output_dir, paste0(prefix, "_trans_ranges.csv")), row.names = FALSE)
     write.csv(cis_final,   file.path(output_dir, paste0(prefix, "_cis_results.csv")),   row.names = FALSE)
     write.csv(trans_final, file.path(output_dir, paste0(prefix, "_trans_results.csv")), row.names = FALSE)
   }
@@ -234,3 +293,4 @@ run_qtl_workflow <- function(
     tss          = tss_used
   )
 }
+

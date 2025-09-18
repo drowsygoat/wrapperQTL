@@ -196,9 +196,6 @@ prepareMatrixEQTLInputs <- function(
   snp_df_merged <- read_and_merge_files(snpPaths)
   snp_samples <- colnames(snp_df_merged)[-1]
   common_samples <- intersect(sample_ids, snp_samples)
-print(sample_ids)
-print(snp_samples)
-
 
   if (verbose) message("Matched ", length(common_samples), " samples across SNP and features.")
 
@@ -232,46 +229,105 @@ print(snp_samples)
     }
   }
 
-  for (group in groups) {
-    if (verbose) message("📦 Processing group: ", group)
-    group_idx <- which(group_data == group & sample_ids %in% common_samples)
-    if (length(group_idx) == 0) next
+for (group in groups) {
+  if (verbose) message("📦 Processing group: ", group)
 
-    mat <- feature_matrix[, group_idx, drop = FALSE]
-    if (!is.null(topNrows)) {
-      top_idx <- order(Matrix::rowSums(mat), decreasing = TRUE)[1:min(topNrows, nrow(mat))]
-      mat <- mat[top_idx, , drop = FALSE]
-    }
+  # (1) Samples that belong to this group
+  group_samples <- sample_ids[group_data == group]
+  message("[DBG][", group, "] group_samples (", length(group_samples), "): ",
+          paste(head(group_samples, 10), collapse = ", "))
 
-    group_dir <- file.path(resultsDir, paste0("group_", group, "_results"))
-    dir.create(group_dir, showWarnings = FALSE, recursive = TRUE)
+  # (2) Intersect with SNPs
+  expr_snp_common <- intersect(group_samples, snp_samples)
+  message("[DBG][", group, "] |expr∩snp|: ", length(expr_snp_common))
 
-    if (!is.null(feature_locs)) {
-      loc_subset <- feature_locs[feature_locs$feature_id %in% rownames(mat), , drop = FALSE]
-      saveRDS(loc_subset, file.path(group_dir, paste0("group_", group, "_feature_locations.rds"))) # saving all locations, is that redundant?
+  # (3) Read covariates for this group
+  cov_df_merged <- read_and_merge_files(covPaths, pattern = paste0(group, "_"))
+  cov_samples   <- colnames(cov_df_merged)[-1]
+  message("[DBG][", group, "] cov_samples (", length(cov_samples), "): ",
+          paste(head(cov_samples, 10), collapse = ", "))
 
-      rows_per_chunk <- ceiling(nrow(loc_subset) / nChunks)
-      for (i in seq_len(nChunks)) {
-        chunk <- loc_subset[((i - 1) * rows_per_chunk + 1):min(i * rows_per_chunk, nrow(loc_subset)), , drop = FALSE]
-        saveRDS(chunk, file.path(group_dir, paste0("group_", group, "_chunk_", i, "_loc_input_MEQTL.rds")))
-      }
-    }
+  # (4) Final per-group common sample set
+  final_common  <- Reduce(intersect, list(expr_snp_common, cov_samples))
+  message("[DBG][", group, "] final_common (", length(final_common), "): ",
+          paste(head(final_common, 10), collapse = ", "))
 
-    rows_per_chunk <- ceiling(nrow(mat) / nChunks)
-    for (i in seq_len(nChunks)) {
-      chunk <- mat[((i - 1) * rows_per_chunk + 1):min(i * rows_per_chunk, nrow(mat)), , drop = FALSE]
-      sliced <- SlicedData$new()
-      sliced$CreateFromMatrix(as(chunk, "matrix"))
-      sliced$ResliceCombined(sliceSize)
-      saveRDS(sliced, file.path(group_dir, paste0("group_", group, "_chunk_", i, "_input_MEQTL.rds")))
-    }
-
-    cov_df_merged <- read_and_merge_files(covPaths, pattern = paste0(group, "_"))
-    cov_samples <- colnames(cov_df_merged)[-1]
-    common_samples <- intersect(intersect(sample_ids, snp_samples), cov_samples)
-    if (verbose) message("Matched ", length(common_samples), " samples across SNP, covariates, and features.")
-    cov_export_path <- file.path(group_dir, "merged_covariates.txt")
-    write.table(cov_df_merged, file = cov_export_path, sep = "\t", quote = FALSE, row.names = FALSE)
+  if (length(final_common) == 0) {
+    if (verbose) message("No overlapping samples for group ", group, " — skipping.")
+    next
   }
+
+  # Where are the mismatches?
+  miss_in_expr <- setdiff(final_common, colnames(feature_matrix))
+  miss_in_snp  <- setdiff(final_common, snp_samples)
+  miss_in_cov  <- setdiff(final_common, cov_samples)
+  message("[DBG][", group, "] final_common not in EXP: ", length(miss_in_expr))
+  if (length(miss_in_expr)) message("[DBG][", group, "] e.g.: ", paste(head(miss_in_expr, 10), collapse = ", "))
+  message("[DBG][", group, "] final_common not in SNP: ", length(miss_in_snp))
+  if (length(miss_in_snp)) message("[DBG][", group, "] e.g.: ", paste(head(miss_in_snp, 10), collapse = ", "))
+  message("[DBG][", group, "] final_common not in COV: ", length(miss_in_cov))
+  if (length(miss_in_cov)) message("[DBG][", group, "] e.g.: ", paste(head(miss_in_cov, 10), collapse = ", "))
+
+head(print(feature_matrix[1:5, 1:5]))
+
+  # --- Subset & reorder expression matrix to final_common ---
+  expr_cols <- match(final_common, colnames(feature_matrix))
+  if (any(is.na(expr_cols))) {
+    missing <- final_common[is.na(expr_cols)]
+    stop("These samples are in final_common but not in feature_matrix columns: ",
+         paste(missing, collapse = ", "))
+  }
+  mat <- feature_matrix[, expr_cols, drop = FALSE]
+  message("[DBG][", group, "] mat dims: ", nrow(mat), " x ", ncol(mat))
+  message("[DBG][", group, "] identical(colnames(mat), final_common)? ",
+          identical(colnames(mat), final_common))
+
+  # --- Optional: keep only top expressed features ---
+  if (!is.null(topNrows)) {
+    top_idx <- order(Matrix::rowSums(mat), decreasing = TRUE)[1:min(topNrows, nrow(mat))]
+    mat <- mat[top_idx, , drop = FALSE]
+  }
+
+  # --- Create group output dir ---
+  group_dir <- file.path(resultsDir, paste0("group_", group, "_results"))
+  dir.create(group_dir, showWarnings = FALSE, recursive = TRUE)
+
+  # --- Save feature locations per group (if available) ---
+  if (!is.null(feature_locs)) {
+    loc_subset <- feature_locs[feature_locs$feature_id %in% rownames(mat), , drop = FALSE]
+    saveRDS(loc_subset, file.path(group_dir, paste0("group_", group, "_feature_locations.rds")))
+
+    rows_per_chunk <- ceiling(nrow(loc_subset) / nChunks)
+    for (i in seq_len(nChunks)) {
+      chunk <- loc_subset[((i - 1) * rows_per_chunk + 1):min(i * rows_per_chunk, nrow(loc_subset)), , drop = FALSE]
+      saveRDS(chunk, file.path(group_dir, paste0("group_", group, "_chunk_", i, "_loc_input_MEQTL.rds")))
+    }
+  }
+
+  # --- Slice expression by rows (features), columns already aligned ---
+  rows_per_chunk <- ceiling(nrow(mat) / nChunks)
+  for (i in seq_len(nChunks)) {
+    chunk <- mat[((i - 1) * rows_per_chunk + 1):min(i * rows_per_chunk, nrow(mat)), , drop = FALSE]
+
+    before_n <- ncol(chunk)
+    sliced <- SlicedData$new()
+    sliced$CreateFromMatrix(as(chunk, "matrix"))
+    after_n <- sliced$nCols()
+    message("[DBG][", group, "] SlicedData columns before/after: ", before_n, " -> ", after_n)
+
+    sliced$ResliceCombined(sliceSize)
+    saveRDS(sliced, file.path(group_dir, paste0("group_", group, "_chunk_", i, "_input_MEQTL.rds")))
+  }
+
+  # --- Export covariates: subset & reorder to final_common ---
+  cov_export <- cov_df_merged[, c("row_id", final_common), drop = FALSE]
+  message("[DBG][", group, "] cov_export dims: ", nrow(cov_export), " x ", ncol(cov_export))
+  message("[DBG][", group, "] cov_export col order ok? ",
+          identical(colnames(cov_export)[-1], final_common))
+  cov_export_path <- file.path(group_dir, "merged_covariates.txt")
+  write.table(cov_export, file = cov_export_path, sep = "\t", quote = FALSE, row.names = FALSE)
+}
+
+
   invisible(TRUE)
 }
